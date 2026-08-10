@@ -12,6 +12,7 @@ dependencies = [
     "pydantic-settings",
     "httpx",
     "fastembed",
+    "anthropic",
 ]
 
 [project.optional-dependencies]
