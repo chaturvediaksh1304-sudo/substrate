@@ -51,7 +51,9 @@ Dockerfile  docker-compose.yml  pyproject.toml  alembic.ini
 .env.example  .gitignore  .dockerignore
 ```
 
-Docs: `PRD.md`, `Architecture.md`, `Rules.md`, `Phases.md`, `Design.md`, `Memory.md`.
+Docs: `README.md`, `PRD.md`, `Architecture.md`, `Rules.md`, `Phases.md`, `Design.md`, `Memory.md`.
+
+Repo: https://github.com/chaturvediaksh1304-sudo/substrate — public, `main`, pushed 2026-08-10.
 
 ## Dependencies
 
