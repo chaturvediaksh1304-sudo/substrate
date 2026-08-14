@@ -3,9 +3,9 @@ import logging
 from dataclasses import dataclass
 from typing import Any, Sequence
 
-from sqlalchemy import select
-from sqlalchemy.dialects.postgresql import insert
-from sqlalchemy.orm import Session
+from sqlalchemy import Integer, func, literal, select
+from sqlalchemy.dialects.postgresql import ARRAY, array, insert
+from sqlalchemy.orm import Session, aliased
 
 from app.agents.claude import MissingAPIKeyError, _client
 from app.config import settings
@@ -15,6 +15,12 @@ log = logging.getLogger(__name__)
 
 # A title + abstract yields a handful of concepts and edges; this is room to spare.
 MAX_TOKENS = 2000
+
+# Two hops is "what does this relate to, and what do those relate to" — the question
+# Phase 4 asks. ponytail: the CTE enumerates simple paths, so cost grows with branching;
+# 4 is where that stays cheap on a corpus this size. Raise it only with numbers in hand.
+DEFAULT_DEPTH = 2
+MAX_DEPTH = 4
 
 SYSTEM = (
     "You extract a knowledge graph from a paper's title and abstract.\n"
@@ -45,6 +51,38 @@ def normalize(name: str) -> str:
     return " ".join(name.split()).lower()
 
 
+@dataclass
+class RelatedConcept:
+    id: int
+    name: str
+    normalized: str
+    hops: int  # 0 is the concept asked about
+
+
+@dataclass
+class RelatedEdge:
+    """One paper's claim about two concepts. Provenance is the payload, not decoration."""
+
+    source: str
+    relation: str
+    target: str
+    evidence: str
+    paper_id: int
+    title: str
+    year: int | None
+    url: str | None
+
+
+@dataclass
+class Subgraph:
+    concept: str  # as asked, not normalized
+    depth: int  # after clamping to MAX_DEPTH
+    # False means no such concept — an empty neighbourhood is a result, not an error.
+    found: bool
+    concepts: list[RelatedConcept]
+    edges: list[RelatedEdge]
+
+
 class GraphWorker:
     """Extracts concepts and relationships from papers. The orchestrator registers by `name`."""
 
@@ -56,6 +94,114 @@ class GraphWorker:
             _extract_paper(session, paper, result)
         log.info("graph extraction: %s", result)
         return result
+
+    # Extraction and traversal take different inputs and answer different questions, so
+    # traversal gets its own method rather than a dispatch flag on run(). The Worker
+    # protocol only asks for `name` + `run`; it stays satisfied.
+    def traverse(self, session: Session, concept: str, depth: int = DEFAULT_DEPTH) -> Subgraph:
+        return traverse(session, concept, depth)
+
+
+def traverse(session: Session, concept: str, depth: int = DEFAULT_DEPTH) -> Subgraph:
+    """The neighbourhood of `concept` within `depth` hops, and the claims connecting it.
+
+    One recursive CTE walks the graph in the database; edges are then fetched for the
+    reached set. Traversal is undirected — `A improves B` is a relationship of B too —
+    and each returned edge carries the paper that asserted it plus the quoted evidence.
+    """
+    depth = min(depth, MAX_DEPTH)
+
+    # Both directions, as one edge list the walk can follow without caring which way it points.
+    steps = (
+        select(
+            ConceptEdge.source_concept_id.label("src"), ConceptEdge.target_concept_id.label("dst")
+        )
+        .union_all(
+            select(
+                ConceptEdge.target_concept_id.label("src"),
+                ConceptEdge.source_concept_id.label("dst"),
+            )
+        )
+        .cte("steps")
+    )
+
+    walk = (
+        select(
+            Concept.id.label("concept_id"),
+            literal(0).label("hops"),
+            array([Concept.id]).label("path"),
+        )
+        .where(Concept.normalized == normalize(concept))
+        .cte("walk", recursive=True)
+    )
+    walk = walk.union_all(
+        select(
+            steps.c.dst.label("concept_id"),
+            (walk.c.hops + 1).label("hops"),
+            func.array_append(walk.c.path, steps.c.dst, type_=ARRAY(Integer)).label("path"),
+        )
+        .join_from(walk, steps, steps.c.src == walk.c.concept_id)
+        .where(
+            walk.c.hops < depth,
+            # Cycle guard. Research graphs contain them ("A builds on B" and "B builds on
+            # A" from two papers); without this the recursion never terminates. The depth
+            # bound alone would stop it, but only after re-walking every loop.
+            ~walk.c.path.any(steps.c.dst),
+        )
+    )
+
+    # A concept reachable by several paths is one node, at its shortest distance.
+    nearest = (
+        select(walk.c.concept_id, func.min(walk.c.hops).label("hops"))
+        .group_by(walk.c.concept_id)
+        .subquery()
+    )
+    concepts = [
+        RelatedConcept(id=row.id, name=row.name, normalized=row.normalized, hops=row.hops)
+        for row in session.execute(
+            select(Concept.id, Concept.name, Concept.normalized, nearest.c.hops)
+            .join(nearest, nearest.c.concept_id == Concept.id)
+            .order_by(nearest.c.hops, Concept.name)
+        )
+    ]
+    log.info("graph traversal: %r reached %d concept(s) at depth %d", concept, len(concepts), depth)
+    if not concepts:
+        return Subgraph(concept=concept, depth=depth, found=False, concepts=[], edges=[])
+
+    return Subgraph(
+        concept=concept,
+        depth=depth,
+        found=True,
+        concepts=concepts,
+        edges=_edges_among(session, [c.id for c in concepts]),
+    )
+
+
+def _edges_among(session: Session, ids: list[int]) -> list[RelatedEdge]:
+    """Every claim whose two endpoints are both inside the neighbourhood."""
+    source, target = aliased(Concept), aliased(Concept)
+    return [
+        RelatedEdge(
+            source=src_name,
+            relation=edge.relation,
+            target=tgt_name,
+            evidence=edge.evidence,
+            paper_id=paper.id,
+            title=paper.title,
+            year=paper.year,
+            url=paper.url,
+        )
+        for edge, src_name, tgt_name, paper in session.execute(
+            select(ConceptEdge, source.name, target.name, Paper)
+            .join(source, source.id == ConceptEdge.source_concept_id)
+            .join(target, target.id == ConceptEdge.target_concept_id)
+            .join(Paper, Paper.id == ConceptEdge.paper_id)
+            .where(
+                ConceptEdge.source_concept_id.in_(ids), ConceptEdge.target_concept_id.in_(ids)
+            )
+            .order_by(ConceptEdge.id)
+        )
+    ]
 
 
 def _extract_paper(session: Session, paper: Paper, result: GraphResult) -> None:

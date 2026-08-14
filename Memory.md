@@ -6,8 +6,8 @@ changed — not at phase boundaries (`Rules.md:31`).
 > **Note:** this structure is a stand-in. Aksh has a template to supply; replace this layout
 > with it when it arrives, keeping the content.
 
-**Last updated:** 2026-08-12 — README added, repo pushed public. Phase 2 still 4 of 5
-verified; criterion 5 blocked on `ANTHROPIC_API_KEY`.
+**Last updated:** 2026-08-13 — Phase 3 traversal, orchestrator delegation and the two `/graph`
+routes landed. Phase 2 still 4 of 5 verified; criterion 5 blocked on `ANTHROPIC_API_KEY`.
 
 ---
 
@@ -17,7 +17,7 @@ verified; criterion 5 blocked on `ANTHROPIC_API_KEY`.
 |---|---|
 | 1 — Foundation & Ingestion | ✅ Verified, all four done-criteria met |
 | 2 — RAG Q&A (MVP) | ⚠️ Built, 4/5 verified — live end-to-end answer needs an API key |
-| 3 — Knowledge graph | 🔨 In progress — schema + extraction landed, traversal/delegation next |
+| 3 — Knowledge graph | ⚠️ Built, all three done-criteria met — extraction *quality* unproven (no API key) |
 | 4–9 | Not started |
 
 ## Current files
@@ -25,7 +25,8 @@ verified; criterion 5 blocked on `ANTHROPIC_API_KEY`.
 ```
 app/
   __init__.py
-  main.py            GET /health (DB-backed), POST /ingest, POST /ask
+  main.py            GET /health (DB-backed), POST /ingest, POST /ask,
+                     POST /graph/build, POST /graph/traverse
   config.py          DATABASE_URL required (fails loud); EMBEDDING_DIM=384;
                      ANTHROPIC_API_KEY optional at startup, required at use; ANTHROPIC_MODEL
   db.py              engine, SessionLocal, Base
@@ -44,14 +45,20 @@ app/
                      cosine distance top-k, LOWER IS BETTER
     synthesis.py     synthesize(question, chunks) -> SynthesisResult; Citation.
                      Citations built server-side from chunks.
-    orchestrator.py  Worker protocol; Orchestrator.answer(session, question, k=5) -> Answer
+    orchestrator.py  Worker protocol; Orchestrator.answer(session, question, k=5) -> Answer;
+                     Orchestrator.relate(session, concept, depth=2) -> Subgraph.
+                     Defaults register RetrievalWorker + GraphWorker
     graph.py         GraphWorker.run(session, papers) -> GraphResult; LLM concept +
-                     edge extraction, validated before persistence
+                     edge extraction, validated before persistence.
+                     GraphWorker.traverse / traverse(session, concept, depth=2) -> Subgraph;
+                     RelatedConcept, RelatedEdge; recursive CTE, both directions,
+                     path-array cycle guard. DEFAULT_DEPTH=2, MAX_DEPTH=4
 migrations/
   env.py  script.py.mako  versions/0001_initial.py  versions/0002_knowledge_graph.py
 tests/
   __init__.py  conftest.py  test_health.py  test_sources.py  test_chunk.py  test_pipeline.py
   test_retrieval.py  test_synthesis.py  test_orchestrator.py  test_ask.py
+  test_graph_extraction.py  test_graph_traversal.py
 Dockerfile  docker-compose.yml  pyproject.toml  alembic.ini
 .env.example  .gitignore  .dockerignore
 ```
@@ -95,6 +102,12 @@ synchronous), `feedparser` (stdlib `xml.etree.ElementTree` parses arXiv's Atom).
 | 2026-08-12 | Edges carry `paper_id` + `evidence` | Phase 4 detects contradictions *across papers*; without knowing who asserted an edge and what text backs it, that phase has nothing to reason over. |
 | 2026-08-12 | Extraction asks for **JSON, validated before persistence** | Same discipline as citations: the model proposes, our code validates. An edge referencing an undeclared concept is dropped and logged, never persisted as a dangling node. |
 | 2026-08-12 | **Shared Anthropic client** moved to `app/agents/claude.py` | Extraction became the second consumer, so the seam earned its own module. A pure move — no retry/config/wrapper added. `MissingAPIKeyError` stays importable from `synthesis` so `main.py` is unbroken. |
+| 2026-08-13 | Traversal is **undirected** | `A improves B` is a fact about B as much as about A. A source→target-only walk silently returns half the neighbourhood. The CTE walks a `UNION ALL` of the edge table with its endpoints swapped. |
+| 2026-08-13 | Cycle guard is a **visited-path array** (`NOT dst = ANY(path)`) plus the depth bound | Two papers asserting `A builds on B` and `B builds on A` is normal in research; an unguarded recursive CTE never returns. The depth bound alone would terminate but only after re-walking every loop. Cost: the CTE enumerates simple paths, so `MAX_DEPTH` is 4 — raise it only with real numbers. |
+| 2026-08-13 | `GraphWorker` gets a **separate `traverse()` method**, not a dispatch flag on `run()` | Extraction takes papers and calls Claude; traversal takes a concept name and touches only Postgres. One entry point would need a mode kwarg branching on a string. The `Worker` protocol only requires `name` + `run`, and both stay satisfied. |
+| 2026-08-13 | Unknown concept → **200 with `found=False`**, never 404 | Same reading as `/ask`'s empty retrieval: "no such concept in this corpus" is a correct answer to the question asked. 503 stays reserved for a missing key or an unreachable Claude, which only `/graph/build` can hit. |
+| 2026-08-13 | Traversal is **two queries**, not one | The recursive CTE finds the neighbourhood; a second query fetches the edges among it with their paper join. Folding both into one statement would not let an edge-less concept report `found=True`. Two bounded queries, not N+1. |
+| 2026-08-13 | Routes stayed in `main.py` at five routes | Contradicts the 2026-08-10 "split at three or more" note. `main.py` is still ~100 lines of thin handlers; the split buys nothing yet. Revisit when Phase 4/5 add theirs. |
 
 ## Known gaps / open items
 
@@ -112,6 +125,12 @@ synchronous), `feedparser` (stdlib `xml.etree.ElementTree` parses arXiv's Atom).
   skipping rather than failing. Run it and a real `POST /ask` once the key lands.
 - **Concept extraction has never run against the live model** — same `ANTHROPIC_API_KEY` gap as
   Phase 2. Extraction *quality* is therefore unproven; only its plumbing is tested.
+  `POST /graph/build` correctly returns 503 today.
+- **The dev DB's 4 concepts / 3 edges were hand-seeded via SQL** (2026-08-13) over real papers
+  11, 12 and 15, purely so `POST /graph/traverse` could be verified live while `/graph/build`
+  is blocked on the key. They are not model output. Delete them once a real build runs.
+- Traversal enumerates **simple paths**, so a hub concept with high degree costs more at
+  `MAX_DEPTH=4` than the row count suggests. Fine at 10 papers; measure before raising the cap.
 - **iCloud bind-mount flakiness**: the container intermittently throws
   `OSError: [Errno 35] Resource deadlock avoided` reading a `.py`/`.toml` that iCloud has
   evicted to the cloud. Not caused by any code change — it killed runs on an unmodified repo.
@@ -139,4 +158,8 @@ curl -X POST localhost:8000/ingest -H 'Content-Type: application/json' \
   -d '{"topic":"<topic>","limit":5}'
 curl -X POST localhost:8000/ask -H 'Content-Type: application/json' \
   -d '{"question":"<question>","k":5}'
+curl -X POST localhost:8000/graph/build -H 'Content-Type: application/json' \
+  -d '{"limit":10}'
+curl -X POST localhost:8000/graph/traverse -H 'Content-Type: application/json' \
+  -d '{"concept":"<concept>","depth":2}'
 ```

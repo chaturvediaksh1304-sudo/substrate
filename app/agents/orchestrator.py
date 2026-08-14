@@ -4,6 +4,7 @@ from typing import Any, Callable, Protocol, Sequence
 
 from sqlalchemy.orm import Session
 
+from app.agents.graph import DEFAULT_DEPTH, GraphWorker, Subgraph
 from app.agents.retrieval import RetrievalWorker
 from app.agents.synthesis import Citation, synthesize
 
@@ -41,7 +42,8 @@ class Orchestrator:
         workers: Sequence[Worker] | None = None,
         synthesize_fn: Callable[..., Any] = synthesize,
     ):
-        self.workers = {worker.name: worker for worker in workers or [RetrievalWorker()]}
+        default = [RetrievalWorker(), GraphWorker()]
+        self.workers = {worker.name: worker for worker in workers or default}
         self.synthesize = synthesize_fn
 
     def answer(self, session: Session, question: str, k: int = 5) -> Answer:
@@ -63,3 +65,7 @@ class Orchestrator:
             chunks_retrieved=len(chunks),
             found=True,
         )
+
+    def relate(self, session: Session, concept: str, depth: int = DEFAULT_DEPTH) -> Subgraph:
+        """Delegate a graph traversal. No synthesis: the subgraph is the answer."""
+        return self.workers["graph"].traverse(session, concept, depth)

@@ -3,12 +3,14 @@ import logging
 import anthropic
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel, Field
-from sqlalchemy import text
+from sqlalchemy import select, text
 
+from app.agents.graph import DEFAULT_DEPTH, MAX_DEPTH, GraphResult, Subgraph
 from app.agents.orchestrator import Answer, Orchestrator
 from app.agents.synthesis import MissingAPIKeyError
 from app.db import SessionLocal, engine
 from app.ingestion.pipeline import IngestResult, ingest_topic
+from app.models import Paper
 
 app = FastAPI(title="Substrate")
 log = logging.getLogger(__name__)
@@ -58,3 +60,37 @@ def ask(request: AskRequest) -> Answer:
         except anthropic.APIError as exc:
             log.error("ask: Claude call failed: %s", exc)
             raise HTTPException(503, "Claude is unavailable; the question was not answered")
+
+
+class GraphBuildRequest(BaseModel):
+    # Same ceiling as /ingest: past 100 papers this wants backgrounding, not a bigger limit.
+    limit: int = Field(default=10, ge=1, le=100)
+
+
+@app.post("/graph/build")
+def graph_build(request: GraphBuildRequest) -> GraphResult:
+    """Extract concepts and relationships from papers already ingested."""
+    with SessionLocal() as session:
+        papers = session.execute(select(Paper).order_by(Paper.id).limit(request.limit)).scalars().all()
+        try:
+            return orchestrator.workers["graph"].run(session, papers)
+        except MissingAPIKeyError as exc:
+            log.error("graph build: %s", exc)
+            raise HTTPException(
+                503, "ANTHROPIC_API_KEY is not configured; /graph/build is unavailable"
+            )
+        except anthropic.APIError as exc:
+            log.error("graph build: Claude call failed: %s", exc)
+            raise HTTPException(503, "Claude is unavailable; the graph was not built")
+
+
+class TraverseRequest(BaseModel):
+    concept: str = Field(min_length=1, pattern=r"\S")
+    depth: int = Field(default=DEFAULT_DEPTH, ge=1, le=MAX_DEPTH)
+
+
+@app.post("/graph/traverse")
+def graph_traverse(request: TraverseRequest) -> Subgraph:
+    # No Claude, no 503: an unknown concept is an empty subgraph with found=False.
+    with SessionLocal() as session:
+        return orchestrator.relate(session, request.concept, request.depth)
