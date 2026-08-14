@@ -6,8 +6,8 @@ changed — not at phase boundaries (`Rules.md:31`).
 > **Note:** this structure is a stand-in. Aksh has a template to supply; replace this layout
 > with it when it arrives, keeping the content.
 
-**Last updated:** 2026-08-10 — Phase 2 built; 4 of 5 done-criteria verified, criterion 5
-blocked on `ANTHROPIC_API_KEY`.
+**Last updated:** 2026-08-12 — README added, repo pushed public. Phase 2 still 4 of 5
+verified; criterion 5 blocked on `ANTHROPIC_API_KEY`.
 
 ---
 
@@ -53,7 +53,7 @@ Dockerfile  docker-compose.yml  pyproject.toml  alembic.ini
 
 Docs: `README.md`, `PRD.md`, `Architecture.md`, `Rules.md`, `Phases.md`, `Design.md`, `Memory.md`.
 
-Repo: https://github.com/chaturvediaksh1304-sudo/substrate — public, `main`, pushed 2026-08-10.
+Repo: https://github.com/chaturvediaksh1304-sudo/substrate — public, `main`, pushed 2026-08-12.
 
 ## Dependencies
 
