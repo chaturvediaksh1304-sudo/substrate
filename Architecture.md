@@ -6,7 +6,7 @@ API/backend-only for now. No UI in MVP. Web UI is planned for Phase 7, mobile ap
 ## Stack
 - Frontend: none yet (Phase 7 will add React/Next.js/TypeScript per Aksh's default stack, decided at that time)
 - Backend: Python + FastAPI
-- Database: **Assumed** — PostgreSQL + pgvector for MVP (papers, metadata, and embeddings in one place, minimal ops overhead). When Phase 3 (knowledge graph) starts, add **Neo4j** alongside Postgres rather than forcing graph data into a relational store. Flag if this split doesn't fit once Phase 3 is scoped in detail.
+- Database: PostgreSQL + pgvector (papers, metadata, and embeddings in one place, minimal ops overhead). **Neo4j was planned for Phase 3 and dropped once Phase 3 was scoped** — this doc invited that flag. The knowledge graph is a `concepts` + `concept_edges` pair of tables traversed with a recursive CTE: no second container, no second driver, no two stores to keep in sync, and Phase 4 gap detection becomes a join against the papers already stored. Revisit Neo4j if multi-hop traversal at real corpus size outgrows a recursive CTE — the graph worker is the only thing that touches graph storage.
 - Auth: none for MVP. OAuth (Google/GitHub) planned for Phase 8 once multi-user support is needed.
 - Hosting/deploy: Docker, self-hosted, for local development now. Repo lives on GitHub as source of truth (see Rules.md — no auto-push). Production hosting for the eventual web app (Docker vs Vercel) is undecided and will be revisited at Phase 7.
 - Third-party APIs/services: **Assumed, flag if wrong** —
@@ -41,4 +41,4 @@ tests/
 2. Papers are chunked and embedded, stored in Postgres/pgvector.
 3. A research question hits the API, gets embedded, and retrieves the most relevant chunks.
 4. Retrieved chunks + question go to Claude for synthesis into a cited answer.
-5. (Later phases) Concepts extracted from papers populate a Neo4j graph; gap detection and hypothesis generation reason over that graph plus the vector store.
+5. (Later phases) Concepts extracted from papers populate the `concepts`/`concept_edges` graph in Postgres; gap detection and hypothesis generation reason over that graph plus the vector store.

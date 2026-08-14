@@ -1,0 +1,245 @@
+import json
+from types import SimpleNamespace
+
+import anthropic
+import httpx
+import pytest
+from sqlalchemy import func, select
+
+from app.agents import graph
+from app.agents.claude import MissingAPIKeyError
+from app.config import settings
+from app.models import Concept, ConceptEdge, Paper
+
+ATTENTION = dict(
+    source="arxiv",
+    external_id="1706.03762v7",
+    title="Attention Is All You Need",
+    abstract="The Transformer replaces recurrence with attention.",
+    authors=["Ashish Vaswani"],
+    year=2017,
+    url="http://arxiv.org/abs/1706.03762v7",
+)
+BERT = dict(
+    source="arxiv",
+    external_id="1810.04805v2",
+    title="BERT",
+    abstract="BERT pre-trains deep bidirectional representations using self-attention.",
+    authors=["Jacob Devlin"],
+    year=2018,
+    url="http://arxiv.org/abs/1810.04805v2",
+)
+
+
+class FakeMessages:
+    """Records the request and replays one canned reply per call; an Exception is raised."""
+
+    def __init__(self, replies):
+        self.replies = list(replies)
+        self.calls = []
+
+    def create(self, **kwargs):
+        self.calls.append(kwargs)
+        reply = self.replies.pop(0) if len(self.replies) > 1 else self.replies[0]
+        if isinstance(reply, Exception):
+            raise reply
+        return SimpleNamespace(content=[SimpleNamespace(type="text", text=reply)])
+
+
+def fake_client(monkeypatch, *replies) -> FakeMessages:
+    messages = FakeMessages(replies)
+    monkeypatch.setattr(graph, "_client", lambda: SimpleNamespace(messages=messages))
+    return messages
+
+
+def reply(concepts, edges) -> str:
+    return json.dumps({"concepts": concepts, "edges": edges})
+
+
+def edge(source, relation, target, evidence="Evidence sentence.") -> dict:
+    return {"source": source, "relation": relation, "target": target, "evidence": evidence}
+
+
+def add_paper(session, **fields) -> Paper:
+    paper = Paper(**fields)
+    session.add(paper)
+    session.commit()
+    return paper
+
+
+def counts(session) -> tuple[int, int]:
+    return (
+        session.execute(select(func.count()).select_from(Concept)).scalar(),
+        session.execute(select(func.count()).select_from(ConceptEdge)).scalar(),
+    )
+
+
+# --- happy path ---------------------------------------------------------------
+
+
+def test_extraction_persists_concepts_and_edges_with_provenance(db_session, monkeypatch):
+    paper = add_paper(db_session, **ATTENTION)
+    messages = fake_client(
+        monkeypatch,
+        reply(
+            ["self-attention", "recurrence"],
+            [edge("self-attention", "replaces", "recurrence", ATTENTION["abstract"])],
+        ),
+    )
+
+    result = graph.GraphWorker().run(db_session, [paper])
+
+    assert result == graph.GraphResult(
+        papers_processed=1, concepts_created=2, edges_created=1, papers_failed=0
+    )
+    concepts = db_session.execute(select(Concept)).scalars().all()
+    assert sorted(c.normalized for c in concepts) == ["recurrence", "self-attention"]
+
+    stored = db_session.execute(select(ConceptEdge)).scalars().one()
+    assert stored.relation == "replaces"
+    # paper_id + evidence are what Phase 4 reasons over — an edge without them is useless.
+    assert stored.paper_id == paper.id
+    assert stored.evidence == ATTENTION["abstract"]
+    by_id = {c.id: c.normalized for c in concepts}
+    assert by_id[stored.source_concept_id] == "self-attention"
+    assert by_id[stored.target_concept_id] == "recurrence"
+
+    prompt = messages.calls[0]["messages"][0]["content"]
+    assert ATTENTION["title"] in prompt
+    assert ATTENTION["abstract"] in prompt
+    assert messages.calls[0]["model"] == settings.ANTHROPIC_MODEL
+
+
+def test_worker_is_registrable_under_the_orchestrator():
+    assert graph.GraphWorker().name == "graph"
+
+
+# --- the point of the graph: one concept, many papers -------------------------
+
+
+def test_same_concept_from_two_papers_collapses_to_one_node(db_session, monkeypatch):
+    """Different casing and whitespace, same concept — one row, edges from both papers."""
+    attention, bert = add_paper(db_session, **ATTENTION), add_paper(db_session, **BERT)
+    fake_client(
+        monkeypatch,
+        reply(
+            ["Self-Attention", "recurrence"],
+            [edge("Self-Attention", "replaces", "recurrence")],
+        ),
+        reply(
+            ["  self-attention  ", "bidirectional pre-training"],
+            [edge("bidirectional pre-training", "builds on", "  self-attention  ")],
+        ),
+    )
+
+    result = graph.GraphWorker().run(db_session, [attention, bert])
+
+    assert result.concepts_created == 3  # not 4: self-attention is shared
+    shared = (
+        db_session.execute(select(Concept).where(Concept.normalized == "self-attention"))
+        .scalars()
+        .one()
+    )
+    edges = db_session.execute(select(ConceptEdge)).scalars().all()
+    assert {e.paper_id for e in edges} == {attention.id, bert.id}
+    assert all(shared.id in (e.source_concept_id, e.target_concept_id) for e in edges)
+
+
+def test_two_papers_asserting_the_same_relation_are_two_edges(db_session, monkeypatch):
+    """Independent corroboration is signal for Phase 4 — it must not be deduped away."""
+    attention, bert = add_paper(db_session, **ATTENTION), add_paper(db_session, **BERT)
+    same = reply(["self-attention", "recurrence"], [edge("self-attention", "replaces", "recurrence")])
+    fake_client(monkeypatch, same)
+
+    result = graph.GraphWorker().run(db_session, [attention, bert])
+
+    assert result.edges_created == 2
+    assert counts(db_session) == (2, 2)
+
+
+# --- idempotency --------------------------------------------------------------
+
+
+def test_rerunning_the_same_paper_does_not_duplicate(db_session, monkeypatch):
+    paper = add_paper(db_session, **ATTENTION)
+    fake_client(
+        monkeypatch,
+        reply(["self-attention", "recurrence"], [edge("self-attention", "replaces", "recurrence")]),
+    )
+    worker = graph.GraphWorker()
+
+    worker.run(db_session, [paper])
+    before = counts(db_session)
+    again = worker.run(db_session, [paper])
+
+    assert counts(db_session) == before
+    assert again.papers_processed == 1
+    assert again.concepts_created == 0
+    assert again.edges_created == 0
+
+
+# --- the model proposes, the code validates -----------------------------------
+
+
+def test_unparseable_json_is_skipped_not_raised(db_session, monkeypatch):
+    paper = add_paper(db_session, **ATTENTION)
+    fake_client(monkeypatch, "Sure! The key concepts are attention and recurrence.")
+
+    result = graph.GraphWorker().run(db_session, [paper])
+
+    assert (result.papers_processed, result.papers_failed) == (0, 1)
+    assert counts(db_session) == (0, 0)
+
+
+def test_edge_referencing_an_undeclared_concept_is_dropped(db_session, monkeypatch, caplog):
+    """A dangling node invented from a bad edge is exactly what must never be written."""
+    paper = add_paper(db_session, **ATTENTION)
+    fake_client(
+        monkeypatch,
+        reply(
+            ["self-attention", "recurrence"],
+            [
+                edge("self-attention", "replaces", "recurrence"),
+                edge("self-attention", "improves", "quantum tunnelling"),
+            ],
+        ),
+    )
+
+    result = graph.GraphWorker().run(db_session, [paper])
+
+    assert (result.papers_processed, result.papers_failed) == (1, 0)
+    assert result.edges_created == 1
+    assert counts(db_session) == (2, 1)
+    assert not db_session.execute(
+        select(Concept).where(Concept.normalized == "quantum tunnelling")
+    ).scalars().all()
+    assert "quantum tunnelling" in caplog.text
+
+
+# --- degrade, don't die -------------------------------------------------------
+
+
+def test_one_paper_failing_does_not_stop_the_batch(db_session, monkeypatch):
+    attention, bert = add_paper(db_session, **ATTENTION), add_paper(db_session, **BERT)
+    fake_client(
+        monkeypatch,
+        anthropic.APIConnectionError(request=httpx.Request("POST", "https://api.anthropic.com")),
+        reply(
+            ["bidirectional pre-training", "self-attention"],
+            [edge("bidirectional pre-training", "builds on", "self-attention")],
+        ),
+    )
+
+    result = graph.GraphWorker().run(db_session, [attention, bert])
+
+    assert (result.papers_processed, result.papers_failed) == (1, 1)
+    assert {e.paper_id for e in db_session.execute(select(ConceptEdge)).scalars()} == {bert.id}
+
+
+def test_missing_api_key_still_fails_loud(db_session, monkeypatch):
+    """Rules.md reserves hard failure for missing keys — it must not degrade to 0 concepts."""
+    paper = add_paper(db_session, **ATTENTION)
+    monkeypatch.setattr(settings, "ANTHROPIC_API_KEY", "")
+
+    with pytest.raises(MissingAPIKeyError):
+        graph.GraphWorker().run(db_session, [paper])

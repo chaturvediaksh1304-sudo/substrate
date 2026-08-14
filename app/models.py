@@ -34,3 +34,43 @@ class Chunk(Base):
     # ponytail: no ivfflat/hnsw index — nothing to tune against yet. Add one
     # (and pick lists/m from real row counts) when sequential scan gets slow.
     embedding: Mapped[list[float]] = mapped_column(Vector(settings.EMBEDDING_DIM))
+
+
+class Concept(Base):
+    __tablename__ = "concepts"
+    # Identity is the normalized form: "Self-Attention" and " self-attention " from two
+    # papers must be one node, or "linked across papers" never happens.
+    __table_args__ = (UniqueConstraint("normalized", name="uq_concepts_normalized"),)
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    name: Mapped[str] = mapped_column(String)  # surface form, as first extracted
+    normalized: Mapped[str] = mapped_column(String)
+
+
+class ConceptEdge(Base):
+    __tablename__ = "concept_edges"
+    # Unique per (source, target, relation, paper): two papers asserting the same
+    # relationship is corroboration Phase 4 needs to count; the same paper asserting it
+    # twice is just a re-run.
+    __table_args__ = (
+        UniqueConstraint(
+            "source_concept_id",
+            "target_concept_id",
+            "relation",
+            "paper_id",
+            name="uq_concept_edges_claim",
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    source_concept_id: Mapped[int] = mapped_column(
+        ForeignKey("concepts.id", ondelete="CASCADE"), index=True
+    )
+    target_concept_id: Mapped[int] = mapped_column(
+        ForeignKey("concepts.id", ondelete="CASCADE"), index=True
+    )
+    relation: Mapped[str] = mapped_column(String(64))
+    # Provenance, not decoration: Phase 4 detects contradictions *across papers* and needs
+    # to know who claimed what, backed by the text that says so.
+    paper_id: Mapped[int] = mapped_column(ForeignKey("papers.id", ondelete="CASCADE"), index=True)
+    evidence: Mapped[str] = mapped_column(Text)

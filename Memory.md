@@ -17,7 +17,8 @@ verified; criterion 5 blocked on `ANTHROPIC_API_KEY`.
 |---|---|
 | 1 — Foundation & Ingestion | ✅ Verified, all four done-criteria met |
 | 2 — RAG Q&A (MVP) | ⚠️ Built, 4/5 verified — live end-to-end answer needs an API key |
-| 3–9 | Not started |
+| 3 — Knowledge graph | 🔨 In progress — schema + extraction landed, traversal/delegation next |
+| 4–9 | Not started |
 
 ## Current files
 
@@ -37,13 +38,17 @@ app/
     pipeline.py      ingest_topic(session, topic, limit) -> IngestResult
   agents/
     __init__.py
+    claude.py        shared lazy Anthropic client + MissingAPIKeyError (moved out of
+                     synthesis.py when extraction became a second consumer)
     retrieval.py     RetrievedChunk; RetrievalWorker.run(session, question, k=5)
                      cosine distance top-k, LOWER IS BETTER
-    synthesis.py     synthesize(question, chunks) -> SynthesisResult; Citation;
-                     MissingAPIKeyError. Citations built server-side from chunks.
+    synthesis.py     synthesize(question, chunks) -> SynthesisResult; Citation.
+                     Citations built server-side from chunks.
     orchestrator.py  Worker protocol; Orchestrator.answer(session, question, k=5) -> Answer
+    graph.py         GraphWorker.run(session, papers) -> GraphResult; LLM concept +
+                     edge extraction, validated before persistence
 migrations/
-  env.py  script.py.mako  versions/0001_initial.py
+  env.py  script.py.mako  versions/0001_initial.py  versions/0002_knowledge_graph.py
 tests/
   __init__.py  conftest.py  test_health.py  test_sources.py  test_chunk.py  test_pipeline.py
   test_retrieval.py  test_synthesis.py  test_orchestrator.py  test_ask.py
@@ -84,6 +89,12 @@ synchronous), `feedparser` (stdlib `xml.etree.ElementTree` parses arXiv's Atom).
 | 2026-08-10 | Sources numbered **per paper**, not per chunk | Two passages from one paper would otherwise burn two citation indices on the same reference. |
 | 2026-08-10 | Empty retrieval → **no Claude call**, `Answer.found = False`, HTTP 200 | An honest "nothing relevant found" is a correct answer, not an error, and saves a pointless API call. |
 | 2026-08-10 | Anthropic API errors **propagate** → 503 | Degrading into a plausible-looking answer would be worse than failing. |
+| 2026-08-12 | **Neo4j dropped; knowledge graph lives in Postgres** as `concepts` + `concept_edges`, traversed by recursive CTE | `Architecture.md` invited the flag once Phase 3 was scoped. No second container, no second driver, no two stores to sync; Phase 4 gap detection becomes a join against papers already stored. Revisit if multi-hop traversal outgrows a CTE — `graph.py` is the only thing touching graph storage. `Phases.md` criterion updated to match. |
+| 2026-08-12 | `concepts.normalized` **unique** | Collapsing the same concept across papers into one node is the whole point — "linked across papers" fails without stable identity. |
+| 2026-08-12 | Edge unique on `(source, target, relation, paper_id)` | Two papers asserting the same relation are two rows — independent corroboration is the signal Phase 4 counts. The same paper asserting it twice is a re-run, not evidence. |
+| 2026-08-12 | Edges carry `paper_id` + `evidence` | Phase 4 detects contradictions *across papers*; without knowing who asserted an edge and what text backs it, that phase has nothing to reason over. |
+| 2026-08-12 | Extraction asks for **JSON, validated before persistence** | Same discipline as citations: the model proposes, our code validates. An edge referencing an undeclared concept is dropped and logged, never persisted as a dangling node. |
+| 2026-08-12 | **Shared Anthropic client** moved to `app/agents/claude.py` | Extraction became the second consumer, so the seam earned its own module. A pure move — no retry/config/wrapper added. `MissingAPIKeyError` stays importable from `synthesis` so `main.py` is unbroken. |
 
 ## Known gaps / open items
 
@@ -99,6 +110,14 @@ synchronous), `feedparser` (stdlib `xml.etree.ElementTree` parses arXiv's Atom).
 - **Phase 2 criterion 5 is unverified**: no `ANTHROPIC_API_KEY` is set, so no live question has
   ever produced a real cited answer. `tests/test_ask.py` holds the end-to-end test, correctly
   skipping rather than failing. Run it and a real `POST /ask` once the key lands.
+- **Concept extraction has never run against the live model** — same `ANTHROPIC_API_KEY` gap as
+  Phase 2. Extraction *quality* is therefore unproven; only its plumbing is tested.
+- **iCloud bind-mount flakiness**: the container intermittently throws
+  `OSError: [Errno 35] Resource deadlock avoided` reading a `.py`/`.toml` that iCloud has
+  evicted to the cloud. Not caused by any code change — it killed runs on an unmodified repo.
+  Workaround before a test run: `find . -name '*.py' | while read f; do cat "$f" >/dev/null; done`
+- Scratch database `substrate_migrate` still exists on the `db` container from migration
+  testing. Harmless; dropping it needs approval per `Rules.md`.
 - `log.error` from app code doesn't surface in `docker compose logs` — uvicorn configures no
   root handler. Affects `pipeline.py`, `retrieval.py`, `synthesis.py`, `main.py`. One logging
   config line fixes it whenever it starts costing debugging time.

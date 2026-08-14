@@ -38,4 +38,6 @@ def db_session(test_engine):
     finally:
         session.close()
         with test_engine.begin() as conn:
-            conn.execute(text("TRUNCATE papers, chunks RESTART IDENTITY CASCADE"))
+            conn.execute(
+                text("TRUNCATE papers, chunks, concepts, concept_edges RESTART IDENTITY CASCADE")
+            )

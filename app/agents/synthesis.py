@@ -4,6 +4,7 @@ from dataclasses import dataclass
 
 import anthropic
 
+from app.agents.claude import MissingAPIKeyError, _client  # noqa: F401 - re-exported: app.main imports it from here
 from app.agents.retrieval import RetrievedChunk
 from app.config import settings
 
@@ -24,10 +25,6 @@ SYSTEM = (
 CITATION_PATTERN = re.compile(r"\[(\d+)\]")
 
 
-class MissingAPIKeyError(RuntimeError):
-    """ANTHROPIC_API_KEY is unset. Hard-failing beats returning a non-answer that looks like one."""
-
-
 @dataclass
 class Citation:
     """A real paper the answer cited, built from a RetrievedChunk — never from the model's prose."""
@@ -44,19 +41,6 @@ class Citation:
 class SynthesisResult:
     answer: str
     citations: list[Citation]
-
-
-_CLIENT: anthropic.Anthropic | None = None
-
-
-def _client() -> anthropic.Anthropic:
-    """Lazy singleton, like embed.py's model: importing without a key is fine, calling is not."""
-    global _CLIENT
-    if not settings.ANTHROPIC_API_KEY:
-        raise MissingAPIKeyError("ANTHROPIC_API_KEY is not set; synthesis cannot run")
-    if _CLIENT is None:
-        _CLIENT = anthropic.Anthropic(api_key=settings.ANTHROPIC_API_KEY)
-    return _CLIENT
 
 
 def _sources(chunks: list[RetrievedChunk]) -> list[tuple[RetrievedChunk, list[str]]]:

@@ -22,9 +22,9 @@ Each phase is a loop: implement → verify against done-criteria → fix → re-
 - Depends on: Phase 1
 
 ## Phase 3: Knowledge Graph
-- Goal: Concepts and relationships extracted from ingested papers, stored in Neo4j, linked across papers — implemented as a graph worker agent under the orchestrator.
+- Goal: Concepts and relationships extracted from ingested papers, stored as a graph, linked across papers — implemented as a graph worker agent under the orchestrator.
 - Done-criteria:
-  - [ ] Neo4j integrated alongside Postgres
+  - [ ] Graph storage integrated alongside the existing schema (`concepts` + `concept_edges` in Postgres; Neo4j dropped at Phase 3 scoping — see Architecture.md)
   - [ ] Graph worker agent extracts concepts and populates nodes/edges from ingested papers
   - [ ] Orchestrator can delegate a graph-traversal task to the graph agent and get relationships between concepts across multiple papers
 - Depends on: Phase 2
