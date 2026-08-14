@@ -6,8 +6,14 @@ changed — not at phase boundaries (`Rules.md:31`).
 > **Note:** this structure is a stand-in. Aksh has a template to supply; replace this layout
 > with it when it arrives, keeping the content.
 
-**Last updated:** 2026-08-13 — Phase 3 traversal, orchestrator delegation and the two `/graph`
-routes landed. Phase 2 still 4 of 5 verified; criterion 5 blocked on `ANTHROPIC_API_KEY`.
+**Last updated:** 2026-08-14 — corpus grown to 55 papers / 107 chunks (retrieval-augmented
+generation). Retrieval verified at that scale. Phases 2 and 3 each still one criterion short,
+both blocked on `ANTHROPIC_API_KEY`.
+
+**Corpus:** 55 papers, 107 chunks, all arXiv (Semantic Scholar still 429s). Topics: retrieval
+augmented generation (~50), protein folding diffusion models (5). Graph tables hold only 4
+hand-seeded concepts / 3 edges from traversal testing — **not model output**; clear them before
+the first real extraction run so seeded rows can't be mistaken for extracted ones.
 
 ---
 
@@ -123,6 +129,15 @@ synchronous), `feedparser` (stdlib `xml.etree.ElementTree` parses arXiv's Atom).
 - **Phase 2 criterion 5 is unverified**: no `ANTHROPIC_API_KEY` is set, so no live question has
   ever produced a real cited answer. `tests/test_ask.py` holds the end-to-end test, correctly
   skipping rather than failing. Run it and a real `POST /ask` once the key lands.
+- **`k` counts chunks, not papers.** A paper split into two chunks can occupy two of the top-k
+  slots, so `k=5` may surface as few as 2–3 distinct papers — narrower evidence than the number
+  suggests. Observed live: a chunking question returned 4 chunks from only 2 papers. Synthesis
+  already groups citations per paper, so the answer isn't wrong, just thinner-sourced than it
+  looks. Consider retrieving by distinct paper, or over-fetching then deduping, if Phase 4's
+  gap detection wants breadth.
+- **~4% corpus noise**: arXiv's `all:` matching pulled 2 augmented-*reality* papers into a
+  retrieval-augmented-*generation* query. Left in deliberately — real literature searches are
+  noisy, and gap detection should be robust to it. A quoted phrase query would tighten it.
 - **Concept extraction has never run against the live model** — same `ANTHROPIC_API_KEY` gap as
   Phase 2. Extraction *quality* is therefore unproven; only its plumbing is tested.
   `POST /graph/build` correctly returns 503 today.
