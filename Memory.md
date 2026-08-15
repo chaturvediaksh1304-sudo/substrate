@@ -24,7 +24,14 @@ the first real extraction run so seeded rows can't be mistaken for extracted one
 | 1 — Foundation & Ingestion | ✅ Verified, all four done-criteria met |
 | 2 — RAG Q&A (MVP) | ⚠️ Built, 4/5 verified — live end-to-end answer needs an API key |
 | 3 — Knowledge graph | ⚠️ Built, all three done-criteria met — extraction *quality* unproven (no API key) |
-| 4–9 | Not started |
+| 4 — Gap detection | 🔨 Part 1 of 4 done (structural gaps, no LLM, fully verified). Parts 2–4 pending |
+| 5–9 | Not started |
+
+**Phase 4 is split into 4 parts**, ordered so the LLM-free part lands first:
+1. ✅ Structural gap detection — open triads, pure SQL, verifiable without a key
+2. Contradiction detection across papers (needs Claude)
+3. Gap ranking + structured output (needs Claude)
+4. `GapWorker` under the orchestrator + `/gaps` route + end-to-end (needs Claude)
 
 ## Current files
 
@@ -54,6 +61,8 @@ app/
     orchestrator.py  Worker protocol; Orchestrator.answer(session, question, k=5) -> Answer;
                      Orchestrator.relate(session, concept, depth=2) -> Subgraph.
                      Defaults register RetrievalWorker + GraphWorker
+    gaps.py          find_open_triads(session, min_papers=1, limit=50) -> [StructuralGap];
+                     one SQL self-join over an undirected edge view. No LLM.
     graph.py         GraphWorker.run(session, papers) -> GraphResult; LLM concept +
                      edge extraction, validated before persistence.
                      GraphWorker.traverse / traverse(session, concept, depth=2) -> Subgraph;
@@ -106,6 +115,10 @@ synchronous), `feedparser` (stdlib `xml.etree.ElementTree` parses arXiv's Atom).
 | 2026-08-12 | `concepts.normalized` **unique** | Collapsing the same concept across papers into one node is the whole point — "linked across papers" fails without stable identity. |
 | 2026-08-12 | Edge unique on `(source, target, relation, paper_id)` | Two papers asserting the same relation are two rows — independent corroboration is the signal Phase 4 counts. The same paper asserting it twice is a re-run, not evidence. |
 | 2026-08-12 | Edges carry `paper_id` + `evidence` | Phase 4 detects contradictions *across papers*; without knowing who asserted an edge and what text backs it, that phase has nothing to reason over. |
+| 2026-08-15 | Phase 4 **split into 4 parts, structural detection first** | It's the only part of gap detection needing no Claude call, so it lands fully verified instead of adding to the stack of unproven LLM behaviour. |
+| 2026-08-15 | Gap signal is the **open triad** (A–B, B–C, no A–C) | The classic literature-based-discovery pattern: the literature connects both concepts to a common one but nobody connected them to each other. One signal done properly beats a suite of graph metrics. |
+| 2026-08-15 | `min_papers` defaults to **1** | Cross-paper support is a *ranking* input for part 3, not a precondition — a stricter default would silently return nothing on a sparse graph. Callers opt into strictness. |
+| 2026-08-15 | Gap pairs keyed by `least(id)/greatest(id)` | (A,C) and (C,A) are the same gap. Ordering the pair by concept id is what makes dedup work, and the paper aggregation relies on that symmetry. |
 | 2026-08-12 | Extraction asks for **JSON, validated before persistence** | Same discipline as citations: the model proposes, our code validates. An edge referencing an undeclared concept is dropped and logged, never persisted as a dangling node. |
 | 2026-08-12 | **Shared Anthropic client** moved to `app/agents/claude.py` | Extraction became the second consumer, so the seam earned its own module. A pure move — no retry/config/wrapper added. `MissingAPIKeyError` stays importable from `synthesis` so `main.py` is unbroken. |
 | 2026-08-13 | Traversal is **undirected** | `A improves B` is a fact about B as much as about A. A source→target-only walk silently returns half the neighbourhood. The CTE walks a `UNION ALL` of the edge table with its endpoints swapped. |
