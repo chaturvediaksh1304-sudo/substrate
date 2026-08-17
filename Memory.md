@@ -6,9 +6,10 @@ changed — not at phase boundaries (`Rules.md:31`).
 > **Note:** this structure is a stand-in. Aksh has a template to supply; replace this layout
 > with it when it arrives, keeping the content.
 
-**Last updated:** 2026-08-14 — corpus grown to 55 papers / 107 chunks (retrieval-augmented
-generation). Retrieval verified at that scale. Phases 2 and 3 each still one criterion short,
-both blocked on `ANTHROPIC_API_KEY`.
+**Last updated:** 2026-08-17 — Phase 4 part 2 landed: cross-paper contradiction detection
+(`find_conflicting_claims` + `judge_contradictions`). 107 tests pass, 1 skips. The candidate
+half needs no key and is verified live; the judge half is plumbing-tested only, like every
+other Claude path.
 
 **Corpus:** 55 papers, 107 chunks, all arXiv (Semantic Scholar still 429s). Topics: retrieval
 augmented generation (~50), protein folding diffusion models (5). Graph tables hold only 4
@@ -24,12 +25,12 @@ the first real extraction run so seeded rows can't be mistaken for extracted one
 | 1 — Foundation & Ingestion | ✅ Verified, all four done-criteria met |
 | 2 — RAG Q&A (MVP) | ⚠️ Built, 4/5 verified — live end-to-end answer needs an API key |
 | 3 — Knowledge graph | ⚠️ Built, all three done-criteria met — extraction *quality* unproven (no API key) |
-| 4 — Gap detection | 🔨 Part 1 of 4 done (structural gaps, no LLM, fully verified). Parts 2–4 pending |
+| 4 — Gap detection | 🔨 Parts 1–2 of 4 done (structural gaps; contradiction detection). Parts 3–4 pending |
 | 5–9 | Not started |
 
 **Phase 4 is split into 4 parts**, ordered so the LLM-free part lands first:
 1. ✅ Structural gap detection — open triads, pure SQL, verifiable without a key
-2. Contradiction detection across papers (needs Claude)
+2. ✅ Contradiction detection across papers — SQL candidates (no key) + Claude judge
 3. Gap ranking + structured output (needs Claude)
 4. `GapWorker` under the orchestrator + `/gaps` route + end-to-end (needs Claude)
 
@@ -63,6 +64,11 @@ app/
                      Defaults register RetrievalWorker + GraphWorker
     gaps.py          find_open_triads(session, min_papers=1, limit=50) -> [StructuralGap];
                      one SQL self-join over an undirected edge view. No LLM.
+                     find_conflicting_claims(session, limit=50) -> [ClaimConflict];
+                     Claim; ordered pair, >=2 papers AND >=2 relations. No LLM.
+                     judge_contradictions([ClaimConflict]) -> [Contradiction];
+                     one Claude call per candidate, JSON verdict validated against
+                     the real rows before a Contradiction is built.
     graph.py         GraphWorker.run(session, papers) -> GraphResult; LLM concept +
                      edge extraction, validated before persistence.
                      GraphWorker.traverse / traverse(session, concept, depth=2) -> Subgraph;
@@ -73,7 +79,7 @@ migrations/
 tests/
   __init__.py  conftest.py  test_health.py  test_sources.py  test_chunk.py  test_pipeline.py
   test_retrieval.py  test_synthesis.py  test_orchestrator.py  test_ask.py
-  test_graph_extraction.py  test_graph_traversal.py
+  test_graph_extraction.py  test_graph_traversal.py  test_gaps.py  test_contradictions.py
 Dockerfile  docker-compose.yml  pyproject.toml  alembic.ini
 .env.example  .gitignore  .dockerignore
 ```
@@ -119,6 +125,10 @@ synchronous), `feedparser` (stdlib `xml.etree.ElementTree` parses arXiv's Atom).
 | 2026-08-15 | Gap signal is the **open triad** (A–B, B–C, no A–C) | The classic literature-based-discovery pattern: the literature connects both concepts to a common one but nobody connected them to each other. One signal done properly beats a suite of graph metrics. |
 | 2026-08-15 | `min_papers` defaults to **1** | Cross-paper support is a *ranking* input for part 3, not a precondition — a stricter default would silently return nothing on a sparse graph. Callers opt into strictness. |
 | 2026-08-15 | Gap pairs keyed by `least(id)/greatest(id)` | (A,C) and (C,A) are the same gap. Ordering the pair by concept id is what makes dedup work, and the paper aggregation relies on that symmetry. |
+| 2026-08-17 | Contradiction candidates are **`>=2 distinct papers` AND `>=2 distinct relations`** on one pair | Same paper twice is one verbose paper; same relation twice is corroboration, the opposite signal. The two counts together are exactly "some two edges differ in both paper and relation" — no third clause needed. |
+| 2026-08-17 | Candidates keyed on the **ordered** pair, unlike part 1's undirected triads | "A improves B" and "B improves A" are different claims. Cost: a disagreement phrased in opposite directions is missed — `ponytail:` note in `ClaimConflict` names the fix (union the reversed edge list in as context) if extraction turns out to phrase claims both ways. |
+| 2026-08-17 | **One Claude call per candidate**, not one batched call | Batching saves tokens and loses the isolation `Rules.md` asks for: one malformed reply would take the whole batch down instead of one pair. |
+| 2026-08-17 | `Contradiction` **wraps its `ClaimConflict`**; the model supplies only verdict + reasoning | Same discipline as citations and edges. The model names paper ids; ids are resolved against the candidate's own claims, and a verdict naming an unknown paper is dropped and logged rather than fabricated into a row. |
 | 2026-08-12 | Extraction asks for **JSON, validated before persistence** | Same discipline as citations: the model proposes, our code validates. An edge referencing an undeclared concept is dropped and logged, never persisted as a dangling node. |
 | 2026-08-12 | **Shared Anthropic client** moved to `app/agents/claude.py` | Extraction became the second consumer, so the seam earned its own module. A pure move — no retry/config/wrapper added. `MissingAPIKeyError` stays importable from `synthesis` so `main.py` is unbroken. |
 | 2026-08-13 | Traversal is **undirected** | `A improves B` is a fact about B as much as about A. A source→target-only walk silently returns half the neighbourhood. The CTE walks a `UNION ALL` of the edge table with its endpoints swapped. |
@@ -151,6 +161,12 @@ synchronous), `feedparser` (stdlib `xml.etree.ElementTree` parses arXiv's Atom).
 - **~4% corpus noise**: arXiv's `all:` matching pulled 2 augmented-*reality* papers into a
   retrieval-augmented-*generation* query. Left in deliberately — real literature searches are
   noisy, and gap detection should be robust to it. A quoted phrase query would tighten it.
+- **The contradiction judge has never run against the live model** — same key gap. Candidate
+  finding (`find_conflicting_claims`) is verified against the real dev DB with no key set;
+  `judge_contradictions` is plumbing-tested only, so verdict *quality* is unproven.
+- **Reverse-direction disagreements are not detected**: `A improves B` (p1) vs `B degrades A`
+  (p2) yields no candidate, by the ordered-pair decision above. Known limitation, tested
+  explicitly in `tests/test_contradictions.py`.
 - **Concept extraction has never run against the live model** — same `ANTHROPIC_API_KEY` gap as
   Phase 2. Extraction *quality* is therefore unproven; only its plumbing is tested.
   `POST /graph/build` correctly returns 503 today.
