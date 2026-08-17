@@ -31,7 +31,7 @@ Work phase-by-phase per Phases.md. Do not attempt multiple phases in a single pa
 Create Memory.md after Phase 1 lands (template in the kickoff kit). From then on, keep it current continuously — not just at phase boundaries: update it whenever a file is added, removed, or a decision changes, not only when a phase completes. Memory.md should always reflect the true current state of the project.
 
 ## Sustainable coding plugin
-Aksh wants the **"ponytail"** plugin used for sustainable coding practices. It's a Claude Code-side plugin (not part of this planning kit's catalog) — confirm it's installed/enabled in the Claude Code environment before Phase 1 starts, and apply it throughout.
+Aksh wants the **"ponytail"** plugin used for sustainable coding practices. It's a Claude Code-side plugin (not part of this planning kit's catalog) — confirm it is installed/enabled in the Claude Code environment before Phase 1 starts, and apply it throughout.
 
 ## Development process — use subagents
 Build Substrate using Claude Code subagents rather than a single monolithic session. Delegate distinct units of work (e.g. ingestion pipeline, retrieval, synthesis, later graph/gap/hypothesis logic) to separate subagents per phase, each scoped to its own goal and done-criteria from Phases.md. Coordinate results back through the main session; Memory.md stays the shared source of truth across subagents.
