@@ -8,7 +8,7 @@ from sqlalchemy.orm import Session, aliased
 
 from app.agents.claude import MissingAPIKeyError, _client
 from app.config import settings
-from app.models import Concept, ConceptEdge
+from app.models import Concept, ConceptEdge, Paper
 
 log = logging.getLogger(__name__)
 
@@ -338,3 +338,240 @@ def _verdict(raw: str, candidate: ClaimConflict) -> Contradiction | None:
         claims=[by_paper[paper_id] for paper_id in named],
         reasoning=str(payload.get("reasoning", "")).strip(),
     )
+
+
+# One Claude call per ranked candidate, so this is a spend cap as much as a page size: the
+# two searches above can hand up to 100 candidates over, and ten assessed gaps is a list a
+# researcher reads in one sitting.
+RANK_LIMIT = 10
+
+# A small explicit scale. Anything finer would be the model inventing precision it does not
+# have, and anything coarser would not sort.
+SIGNIFICANCE = (1, 2, 3)  # 1 minor, 2 notable, 3 important
+
+ASSESS_SYSTEM = (
+    "You assess whether a candidate research gap, found by searching a knowledge graph "
+    "built from paper abstracts, is a real gap worth a researcher's attention.\n"
+    "Reply with JSON only, in exactly this shape:\n"
+    '{"verdict": "real_gap" or "not_a_gap", "significance": 1, 2 or 3, '
+    '"rationale": "one or two sentences"}\n'
+    "A missing link between two concepts is not a real gap when the connection is obvious "
+    "or trivial, when literature you know of already covers it and this corpus merely lacks "
+    "those papers, or when the concepts read as extraction noise rather than real ideas.\n"
+    "Conflicting claims are not a real gap when they are compatible once read in context — "
+    "different settings, different metrics, different populations.\n"
+    "Significance is 1 for minor, 2 for notable, 3 for important.\n"
+    "Judge only whether the gap is real and how much it matters. Do not propose hypotheses, "
+    "experiments, or research directions, and do not name any concept or paper beyond the "
+    "ones shown to you.\n"
+    "No prose, no markdown fences, no explanation outside the JSON."
+)
+
+
+@dataclass
+class GapPaper:
+    """A supporting paper, named. `paper_ids` alone is a graph stat; a title is readable."""
+
+    id: int
+    title: str
+
+
+@dataclass
+class CandidateGap:
+    """One assessed gap, of either signal type — `kind` says which.
+
+    `kind` is `"missing_link"` (part 1's open triad: A and B both tie to a common third
+    concept, never to each other) or `"contradiction"` (part 2's conflict: papers asserting
+    different relations about the same ordered pair). One type with a discriminator beats two
+    parallel types, because part 4 returns a single JSON list over HTTP.
+
+    The concept pair is unordered for a missing link and ordered (a -> b) for a contradiction,
+    exactly as the two searches report it.
+
+    `evidence` is whatever the rows say backs the candidate: the bridging concept names for a
+    missing link, the papers' own claim sentences for a contradiction. Everything here except
+    `significance` and `rationale` comes from the database — the model judges, it never
+    supplies a fact.
+    """
+
+    kind: str
+    concept_a_id: int
+    concept_a: str
+    concept_b_id: int
+    concept_b: str
+    papers: list[GapPaper]
+    evidence: list[str]
+    prescore: int  # deterministic, pre-model; see `_candidates`
+    significance: int = 0  # the model's, 1-3; 0 until assessed
+    rationale: str = ""  # the model's, and the only prose it contributes
+
+
+def rank_gaps(session: Session, limit: int = RANK_LIMIT) -> list[CandidateGap]:
+    """Both gap signals, gathered, assessed by Claude, and returned as one ranked list.
+
+    Only the top `limit` candidates by prescore are assessed, so the number of API calls is
+    bounded by `limit` rather than by the size of the graph — the reason this stays usable
+    on a corpus where open triads run to the thousands.
+
+    Per Rules.md one candidate failing — API error, unparseable JSON, bad shape — is logged
+    and skipped while the batch continues; a missing key is config, not data, and fails the
+    whole run loudly. An empty graph is `[]`.
+    """
+    candidates = _candidates(session)
+    found = []
+    for candidate in candidates[:limit]:
+        try:
+            assessed = _assess(candidate)
+        except MissingAPIKeyError:
+            raise
+        except Exception as exc:
+            log.warning(
+                "gap ranking: skipping %s %s / %s: %s",
+                candidate.kind,
+                candidate.concept_a,
+                candidate.concept_b,
+                exc,
+            )
+            continue
+        if assessed is not None:
+            found.append(assessed)
+    # Significance first because it is the judgement; the prescore only breaks its ties, and
+    # the concept pair is the total order underneath both, so two runs cannot disagree.
+    found.sort(
+        key=lambda gap: (
+            -gap.significance,
+            -gap.prescore,
+            gap.concept_a_id,
+            gap.concept_b_id,
+            gap.kind,
+        )
+    )
+    log.info(
+        "gap ranking: %d gap(s) from %d assessed of %d candidate(s)",
+        len(found),
+        min(limit, len(candidates)),
+        len(candidates),
+    )
+    return found
+
+
+def _candidates(session: Session) -> list[CandidateGap]:
+    """Both signals as one prescored, deterministically ordered list. No model, no key.
+
+    The prescore counts independent support: bridges and distinct papers behind a missing
+    link, distinct disagreeing papers behind a contradiction.
+    ponytail: it is a heuristic *ordering*, not a truth claim — two bridges is not "twice
+    the gap" of one, and the two signal types are only roughly comparable. It exists to pick
+    which candidates are worth an API call and to break the model's ties. Fit real weights
+    when there is data to fit them to, and not before.
+    """
+    triads = find_open_triads(session)
+    conflicts = find_conflicting_claims(session)
+    # One join for the whole batch — a title lookup per gap would be N+1 against `papers`.
+    titles = _titles(
+        session,
+        {paper_id for gap in triads for paper_id in gap.paper_ids}
+        | {claim.paper_id for conflict in conflicts for claim in conflict.claims},
+    )
+
+    candidates = [
+        CandidateGap(
+            kind="missing_link",
+            concept_a_id=gap.concept_a_id,
+            concept_a=gap.concept_a,
+            concept_b_id=gap.concept_b_id,
+            concept_b=gap.concept_b,
+            papers=[GapPaper(id=pid, title=titles[pid]) for pid in sorted(set(gap.paper_ids))],
+            evidence=sorted(gap.bridges),
+            prescore=gap.bridge_count + len(set(gap.paper_ids)),
+        )
+        for gap in triads
+    ] + [
+        CandidateGap(
+            kind="contradiction",
+            concept_a_id=conflict.source_concept_id,
+            concept_a=conflict.source_concept,
+            concept_b_id=conflict.target_concept_id,
+            concept_b=conflict.target_concept,
+            papers=[
+                GapPaper(id=pid, title=titles[pid])
+                for pid in sorted({claim.paper_id for claim in conflict.claims})
+            ],
+            evidence=[claim.evidence for claim in conflict.claims],
+            prescore=len({claim.paper_id for claim in conflict.claims}),
+        )
+        for conflict in conflicts
+    ]
+    candidates.sort(
+        key=lambda gap: (-gap.prescore, gap.concept_a_id, gap.concept_b_id, gap.kind)
+    )
+    return candidates
+
+
+def _titles(session: Session, paper_ids: set[int]) -> dict[int, str]:
+    if not paper_ids:
+        return {}
+    return dict(
+        session.execute(select(Paper.id, Paper.title).where(Paper.id.in_(paper_ids))).all()
+    )
+
+
+def _assess(candidate: CandidateGap) -> CandidateGap | None:
+    try:
+        message = _client().messages.create(
+            model=settings.ANTHROPIC_MODEL,
+            max_tokens=MAX_TOKENS,
+            system=ASSESS_SYSTEM,
+            messages=[{"role": "user", "content": _assess_prompt(candidate)}],
+        )
+    except anthropic.APIError as exc:
+        raise RuntimeError(f"Anthropic API call failed: {exc}") from exc
+    raw = "".join(block.text for block in message.content if block.type == "text")
+    return _assessment(raw, candidate)
+
+
+def _assess_prompt(candidate: CandidateGap) -> str:
+    """Only rows: the two concepts, the papers by title, and the sentences behind them."""
+    if candidate.kind == "missing_link":
+        header = (
+            f"No paper in this corpus links these two concepts directly:\n"
+            f"- {candidate.concept_a}\n- {candidate.concept_b}\n"
+            f"Both are linked to: {', '.join(candidate.evidence)}"
+        )
+    else:
+        header = (
+            f"Papers in this corpus disagree about {candidate.concept_a} -> "
+            f"{candidate.concept_b}. What they say:\n"
+            + "\n".join(f"- {sentence}" for sentence in candidate.evidence)
+        )
+    papers = "\n".join(f"- paper {paper.id}: {paper.title}" for paper in candidate.papers)
+    return f"{header}\n\nSupporting papers:\n{papers}"
+
+
+def _assessment(raw: str, candidate: CandidateGap) -> CandidateGap | None:
+    """The model proposes; this decides. Raises on anything the caller must not return."""
+    # Models wrap JSON in ``` fences out of habit, prompt or no prompt.
+    payload = json.loads(raw.strip().removeprefix("```json").removeprefix("```").removesuffix("```"))
+
+    verdict = str(payload["verdict"]).strip().lower()
+    if verdict not in ("real_gap", "not_a_gap"):
+        raise ValueError(f"unknown verdict {verdict!r}")
+    if verdict == "not_a_gap":
+        log.info(
+            "gap ranking: model called %s %s / %s not a real gap: %s",
+            candidate.kind,
+            candidate.concept_a,
+            candidate.concept_b,
+            str(payload.get("rationale", "")).strip(),
+        )
+        return None
+
+    significance = payload.get("significance")
+    # Membership, not clamping: a 9 or a "high" is a bad shape, and coercing it would invent
+    # a rating the model never gave.
+    if significance not in SIGNIFICANCE:
+        raise ValueError(f"significance {significance!r} is outside {SIGNIFICANCE}")
+
+    candidate.significance = significance
+    candidate.rationale = str(payload.get("rationale", "")).strip()
+    return candidate
