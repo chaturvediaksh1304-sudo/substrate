@@ -1,6 +1,7 @@
 import json
 import logging
 from dataclasses import dataclass
+from typing import Any
 
 import anthropic
 from sqlalchemy import desc, distinct, exists, func, select
@@ -575,3 +576,16 @@ def _assessment(raw: str, candidate: CandidateGap) -> CandidateGap | None:
     candidate.significance = significance
     candidate.rationale = str(payload.get("rationale", "")).strip()
     return candidate
+
+
+class GapWorker:
+    """Detects gaps in the knowledge graph. The orchestrator registers by `name`."""
+
+    name = "gaps"
+
+    # Gap detection asks the graph, not a question, so `run` takes the session and the
+    # spend cap — the same latitude GraphWorker's `run(session, papers)` takes. The
+    # Worker protocol is structural and asks only for `name` + `run`; it stays satisfied.
+    # There is one capability here, so there is no second method and no dispatch flag.
+    def run(self, session: Session, limit: int = RANK_LIMIT, **kwargs: Any) -> list[CandidateGap]:
+        return rank_gaps(session, limit)

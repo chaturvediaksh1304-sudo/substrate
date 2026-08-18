@@ -6,9 +6,9 @@ changed — not at phase boundaries (`Rules.md:31`).
 > **Note:** this structure is a stand-in. Aksh has a template to supply; replace this layout
 > with it when it arrives, keeping the content.
 
-**Last updated:** 2026-08-17 — Phase 4 part 3 landed: gap ranking and structured output
-(`rank_gaps`). 122 tests pass, 1 skips. The prescore half needs no key and is verified live;
-the assessment half is plumbing-tested only, like every other Claude path.
+**Last updated:** 2026-08-17 — **Phase 4 structurally complete** (all 4 parts): `GapWorker`
+under the orchestrator and `POST /gaps`. 132 tests pass, 1 skips. Every LLM-free half is
+verified live; every Claude path is plumbing-tested only, still awaiting `ANTHROPIC_API_KEY`.
 
 **Corpus:** 55 papers, 107 chunks, all arXiv (Semantic Scholar still 429s). Topics: retrieval
 augmented generation (~50), protein folding diffusion models (5). Graph tables hold only 4
@@ -24,14 +24,14 @@ the first real extraction run so seeded rows can't be mistaken for extracted one
 | 1 — Foundation & Ingestion | ✅ Verified, all four done-criteria met |
 | 2 — RAG Q&A (MVP) | ⚠️ Built, 4/5 verified — live end-to-end answer needs an API key |
 | 3 — Knowledge graph | ⚠️ Built, all three done-criteria met — extraction *quality* unproven (no API key) |
-| 4 — Gap detection | 🔨 Parts 1–3 of 4 done (structural gaps; contradictions; ranking). Part 4 pending |
+| 4 — Gap detection | ⚠️ All 4 parts built, three done-criteria met structurally — gap *quality* unproven (no API key) |
 | 5–9 | Not started |
 
 **Phase 4 is split into 4 parts**, ordered so the LLM-free part lands first:
 1. ✅ Structural gap detection — open triads, pure SQL, verifiable without a key
 2. ✅ Contradiction detection across papers — SQL candidates (no key) + Claude judge
 3. ✅ Gap ranking + structured output — deterministic prescore (no key) + Claude assessment
-4. `GapWorker` under the orchestrator + `/gaps` route + end-to-end (needs Claude)
+4. ✅ `GapWorker` under the orchestrator + `/gaps` route + end-to-end
 
 ## Current files
 
@@ -39,7 +39,8 @@ the first real extraction run so seeded rows can't be mistaken for extracted one
 app/
   __init__.py
   main.py            GET /health (DB-backed), POST /ingest, POST /ask,
-                     POST /graph/build, POST /graph/traverse
+                     POST /graph/build, POST /graph/traverse, POST /gaps
+                     — six routes; the "split at three" decision below is now overdue
   config.py          DATABASE_URL required (fails loud); EMBEDDING_DIM=384;
                      ANTHROPIC_API_KEY optional at startup, required at use; ANTHROPIC_MODEL
   db.py              engine, SessionLocal, Base
@@ -59,8 +60,9 @@ app/
     synthesis.py     synthesize(question, chunks) -> SynthesisResult; Citation.
                      Citations built server-side from chunks.
     orchestrator.py  Worker protocol; Orchestrator.answer(session, question, k=5) -> Answer;
-                     Orchestrator.relate(session, concept, depth=2) -> Subgraph.
-                     Defaults register RetrievalWorker + GraphWorker
+                     Orchestrator.relate(session, concept, depth=2) -> Subgraph;
+                     Orchestrator.find_gaps(session, limit=10) -> [CandidateGap].
+                     Defaults register RetrievalWorker + GraphWorker + GapWorker
     gaps.py          find_open_triads(session, min_papers=1, limit=50) -> [StructuralGap];
                      one SQL self-join over an undirected edge view. No LLM.
                      find_conflicting_claims(session, limit=50) -> [ClaimConflict];
@@ -71,6 +73,7 @@ app/
                      rank_gaps(session, limit=10) -> [CandidateGap]; CandidateGap,
                      GapPaper. _candidates() gathers both signals, hydrates paper
                      titles in one query, prescores deterministically — no LLM.
+                     GapWorker.run(session, limit=10) -> [CandidateGap]; name="gaps".
     graph.py         GraphWorker.run(session, papers) -> GraphResult; LLM concept +
                      edge extraction, validated before persistence.
                      GraphWorker.traverse / traverse(session, concept, depth=2) -> Subgraph;
@@ -82,7 +85,7 @@ tests/
   __init__.py  conftest.py  test_health.py  test_sources.py  test_chunk.py  test_pipeline.py
   test_retrieval.py  test_synthesis.py  test_orchestrator.py  test_ask.py
   test_graph_extraction.py  test_graph_traversal.py  test_gaps.py  test_contradictions.py
-  test_gap_ranking.py
+  test_gap_ranking.py  test_gaps_route.py
 Dockerfile  docker-compose.yml  pyproject.toml  alembic.ini
 .env.example  .gitignore  .dockerignore
 ```
@@ -132,6 +135,8 @@ synchronous), `feedparser` (stdlib `xml.etree.ElementTree` parses arXiv's Atom).
 | 2026-08-17 | Candidates keyed on the **ordered** pair, unlike part 1's undirected triads | "A improves B" and "B improves A" are different claims. Cost: a disagreement phrased in opposite directions is missed — `ponytail:` note in `ClaimConflict` names the fix (union the reversed edge list in as context) if extraction turns out to phrase claims both ways. |
 | 2026-08-17 | **One Claude call per candidate**, not one batched call | Batching saves tokens and loses the isolation `Rules.md` asks for: one malformed reply would take the whole batch down instead of one pair. |
 | 2026-08-17 | `Contradiction` **wraps its `ClaimConflict`**; the model supplies only verdict + reasoning | Same discipline as citations and edges. The model names paper ids; ids are resolved against the candidate's own claims, and a verdict naming an unknown paper is dropped and logged rather than fabricated into a row. |
+| 2026-08-17 | `GapWorker.run(session, limit)` — **one capability, no sibling method** | `GraphWorker` set the precedent of giving `run()` the real signature rather than the protocol's `question: str`. Unlike graph, gap detection has exactly one capability, so a second method would be an abstraction nobody asked for. |
+| 2026-08-17 | `/gaps` `limit` bounded **1–50** | It governs how many Claude calls happen, so the bound is a spend guard, not input hygiene. |
 | 2026-08-17 | Gap **prescore is `bridges + distinct papers`** (missing link) / `distinct papers` (contradiction) | Two lines of arithmetic counting independent support. Explicitly a heuristic ordering, not a truth claim — weights get fitted when there's data to fit them to. Its job is bounding Claude calls, not being right. |
 | 2026-08-17 | **`limit` bounds Claude calls, not candidates gathered** | Spend follows the limit, not the graph. Verified: 15 candidates with `limit=3` makes exactly 3 calls. Default 10, since one call per candidate makes it a spend cap. |
 | 2026-08-17 | **One `CandidateGap` type with a `kind` discriminator** (`missing_link` \| `contradiction`) | Part 4 returns a single JSON array over HTTP; two parallel types would force the route to merge them anyway. |
@@ -175,6 +180,12 @@ synchronous), `feedparser` (stdlib `xml.etree.ElementTree` parses arXiv's Atom).
 - **Reverse-direction disagreements are not detected**: `A improves B` (p1) vs `B degrades A`
   (p2) yields no candidate, by the ordered-pair decision above. Known limitation, tested
   explicitly in `tests/test_contradictions.py`.
+- **`POST /gaps` returns 503 live** and will until a key lands, so ranked-gap quality over
+  HTTP is unproven end to end. The chain below it (SQL → worker → orchestrator → route) is
+  proven with only Claude mocked.
+- **`app/main.py` now has six routes**, against the 2026-08-10 decision to split into
+  `app/api/` at three or more. Deliberately not done inside Phase 4's parts — it would have
+  buried each part's diff. Overdue as its own change.
 - **Gap assessment has never run against the live model** — significance ratings and rationales
   are plumbing-tested only. Whether Claude can tell a real research gap from an obvious or
   extraction-artifact one is the entire value of part 3, and it is unproven.

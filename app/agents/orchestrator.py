@@ -4,6 +4,7 @@ from typing import Any, Callable, Protocol, Sequence
 
 from sqlalchemy.orm import Session
 
+from app.agents.gaps import RANK_LIMIT, CandidateGap, GapWorker
 from app.agents.graph import DEFAULT_DEPTH, GraphWorker, Subgraph
 from app.agents.retrieval import RetrievalWorker
 from app.agents.synthesis import Citation, synthesize
@@ -42,7 +43,7 @@ class Orchestrator:
         workers: Sequence[Worker] | None = None,
         synthesize_fn: Callable[..., Any] = synthesize,
     ):
-        default = [RetrievalWorker(), GraphWorker()]
+        default = [RetrievalWorker(), GraphWorker(), GapWorker()]
         self.workers = {worker.name: worker for worker in workers or default}
         self.synthesize = synthesize_fn
 
@@ -69,3 +70,7 @@ class Orchestrator:
     def relate(self, session: Session, concept: str, depth: int = DEFAULT_DEPTH) -> Subgraph:
         """Delegate a graph traversal. No synthesis: the subgraph is the answer."""
         return self.workers["graph"].traverse(session, concept, depth)
+
+    def find_gaps(self, session: Session, limit: int = RANK_LIMIT) -> list[CandidateGap]:
+        """Delegate gap detection. No synthesis: the ranked list is the answer."""
+        return self.workers["gaps"].run(session, limit)

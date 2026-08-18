@@ -5,6 +5,7 @@ from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel, Field
 from sqlalchemy import select, text
 
+from app.agents.gaps import RANK_LIMIT, CandidateGap
 from app.agents.graph import DEFAULT_DEPTH, MAX_DEPTH, GraphResult, Subgraph
 from app.agents.orchestrator import Answer, Orchestrator
 from app.agents.synthesis import MissingAPIKeyError
@@ -94,3 +95,23 @@ def graph_traverse(request: TraverseRequest) -> Subgraph:
     # No Claude, no 503: an unknown concept is an empty subgraph with found=False.
     with SessionLocal() as session:
         return orchestrator.relate(session, request.concept, request.depth)
+
+
+class GapsRequest(BaseModel):
+    # One Claude call per gap assessed, so this is a spend cap, not a page size. 50 is
+    # what either search hands over at most; past that a caller wants a batch job.
+    limit: int = Field(default=RANK_LIMIT, ge=1, le=50)
+
+
+@app.post("/gaps")
+def find_gaps(request: GapsRequest) -> list[CandidateGap]:
+    """Rank candidate gaps in the knowledge graph. An empty graph is [], not an error."""
+    with SessionLocal() as session:
+        try:
+            return orchestrator.find_gaps(session, request.limit)
+        except MissingAPIKeyError as exc:
+            log.error("gaps: %s", exc)
+            raise HTTPException(503, "ANTHROPIC_API_KEY is not configured; /gaps is unavailable")
+        except anthropic.APIError as exc:
+            log.error("gaps: Claude call failed: %s", exc)
+            raise HTTPException(503, "Claude is unavailable; gaps were not detected")
