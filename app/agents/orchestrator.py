@@ -6,6 +6,7 @@ from sqlalchemy.orm import Session
 
 from app.agents.gaps import RANK_LIMIT, CandidateGap, GapWorker
 from app.agents.graph import DEFAULT_DEPTH, GraphWorker, Subgraph
+from app.agents.hypothesis import HYPOTHESIS_LIMIT, Hypothesis, HypothesisWorker
 from app.agents.retrieval import RetrievalWorker
 from app.agents.synthesis import Citation, synthesize
 
@@ -22,6 +23,20 @@ class Worker(Protocol):
     name: str
 
     def run(self, session: Session, question: str, **kwargs: Any) -> Any: ...
+
+
+@dataclass
+class Hypotheses:
+    """Hypotheses off the top gaps, plus how many gaps were behind them.
+
+    `gaps_considered` is what makes an empty list readable: 0 means the graph held no gaps
+    to work from, and anything higher means gaps were found and every proposal was refused
+    (a restatement, a bad shape, an unusable reply). Same job `Answer.found` does — an
+    honest non-result that a caller can tell apart from a real one without parsing prose.
+    """
+
+    gaps_considered: int
+    hypotheses: list[Hypothesis]
 
 
 @dataclass
@@ -43,7 +58,7 @@ class Orchestrator:
         workers: Sequence[Worker] | None = None,
         synthesize_fn: Callable[..., Any] = synthesize,
     ):
-        default = [RetrievalWorker(), GraphWorker(), GapWorker()]
+        default = [RetrievalWorker(), GraphWorker(), GapWorker(), HypothesisWorker()]
         self.workers = {worker.name: worker for worker in workers or default}
         self.synthesize = synthesize_fn
 
@@ -74,3 +89,22 @@ class Orchestrator:
     def find_gaps(self, session: Session, limit: int = RANK_LIMIT) -> list[CandidateGap]:
         """Delegate gap detection. No synthesis: the ranked list is the answer."""
         return self.workers["gaps"].run(session, limit)
+
+    def hypothesize(self, session: Session, limit: int = HYPOTHESIS_LIMIT) -> Hypotheses:
+        """Delegate gap detection, then one hypothesis per gap. Both hops go via the registry.
+
+        The entry point is the corpus, not a hand-built gap: a `CandidateGap` carries concept
+        ids, paper rows and a model's assessment, so a caller cannot supply one — it comes out
+        of `find_gaps`. `limit` is therefore one knob for both hops, capping the gaps assessed
+        and the hypotheses attempted, because assessing gaps nobody will hypothesize over is
+        spend with nothing to show for it.
+
+        A gap the model produces nothing usable from is dropped, not raised on — that is
+        `generate_hypothesis`' contract, and `gaps_considered` keeps it visible.
+        """
+        gaps = self.find_gaps(session, limit)
+        found = [self.workers["hypothesis"].run(session, gap) for gap in gaps]
+        return Hypotheses(
+            gaps_considered=len(gaps),
+            hypotheses=[hypothesis for hypothesis in found if hypothesis is not None],
+        )

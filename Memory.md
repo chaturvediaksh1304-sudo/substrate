@@ -6,8 +6,8 @@ changed — not at phase boundaries (`Rules.md:31`).
 > **Note:** this structure is a stand-in. Aksh has a template to supply; replace this layout
 > with it when it arrives, keeping the content.
 
-**Last updated:** 2026-08-17 — **Phase 4 structurally complete** (all 4 parts): `GapWorker`
-under the orchestrator and `POST /gaps`. 132 tests pass, 1 skips. Every LLM-free half is
+**Last updated:** 2026-08-17 — **Phase 5 built** (both parts): hypothesis generation,
+`HypothesisWorker`, `POST /hypotheses`. 172 tests pass, 1 skips. Every LLM-free half is
 verified live; every Claude path is plumbing-tested only, still awaiting `ANTHROPIC_API_KEY`.
 
 **Corpus:** 55 papers, 107 chunks, all arXiv (Semantic Scholar still 429s). Topics: retrieval
@@ -25,7 +25,8 @@ the first real extraction run so seeded rows can't be mistaken for extracted one
 | 2 — RAG Q&A (MVP) | ⚠️ Built, 4/5 verified — live end-to-end answer needs an API key |
 | 3 — Knowledge graph | ⚠️ Built, all three done-criteria met — extraction *quality* unproven (no API key) |
 | 4 — Gap detection | ⚠️ All 4 parts built, three done-criteria met structurally — gap *quality* unproven (no API key) |
-| 5–9 | Not started |
+| 5 — Hypothesis generation | ⚠️ Built, 2/3 criteria met structurally — criterion 3 ("reviewed for quality") is unmeetable without a key |
+| 6–9 | Not started |
 
 **Phase 4 is split into 4 parts**, ordered so the LLM-free part lands first:
 1. ✅ Structural gap detection — open triads, pure SQL, verifiable without a key
@@ -39,8 +40,9 @@ the first real extraction run so seeded rows can't be mistaken for extracted one
 app/
   __init__.py
   main.py            GET /health (DB-backed), POST /ingest, POST /ask,
-                     POST /graph/build, POST /graph/traverse, POST /gaps
-                     — six routes; the "split at three" decision below is now overdue
+                     POST /graph/build, POST /graph/traverse, POST /gaps,
+                     POST /hypotheses
+                     — seven routes; the "split at three" decision below is overdue
   config.py          DATABASE_URL required (fails loud); EMBEDDING_DIM=384;
                      ANTHROPIC_API_KEY optional at startup, required at use; ANTHROPIC_MODEL
   db.py              engine, SessionLocal, Base
@@ -61,8 +63,10 @@ app/
                      Citations built server-side from chunks.
     orchestrator.py  Worker protocol; Orchestrator.answer(session, question, k=5) -> Answer;
                      Orchestrator.relate(session, concept, depth=2) -> Subgraph;
-                     Orchestrator.find_gaps(session, limit=10) -> [CandidateGap].
+                     Orchestrator.find_gaps(session, limit=10) -> [CandidateGap];
+                     Orchestrator.hypothesize(session, limit=3) -> Hypotheses.
                      Defaults register RetrievalWorker + GraphWorker + GapWorker
+                     + HypothesisWorker
     gaps.py          find_open_triads(session, min_papers=1, limit=50) -> [StructuralGap];
                      one SQL self-join over an undirected edge view. No LLM.
                      find_conflicting_claims(session, limit=50) -> [ClaimConflict];
@@ -74,6 +78,10 @@ app/
                      GapPaper. _candidates() gathers both signals, hydrates paper
                      titles in one query, prescores deterministically — no LLM.
                      GapWorker.run(session, limit=10) -> [CandidateGap]; name="gaps".
+    hypothesis.py    generate_hypothesis(session, gap) -> Hypothesis | None; Hypothesis
+                     (statement, manipulation, measurement, predicted_effect, falsifier,
+                     papers from rows). restates_gap()/novel_terms() — deterministic
+                     restatement guard, no LLM. HypothesisWorker.run(session, gap).
     graph.py         GraphWorker.run(session, papers) -> GraphResult; LLM concept +
                      edge extraction, validated before persistence.
                      GraphWorker.traverse / traverse(session, concept, depth=2) -> Subgraph;
@@ -85,7 +93,7 @@ tests/
   __init__.py  conftest.py  test_health.py  test_sources.py  test_chunk.py  test_pipeline.py
   test_retrieval.py  test_synthesis.py  test_orchestrator.py  test_ask.py
   test_graph_extraction.py  test_graph_traversal.py  test_gaps.py  test_contradictions.py
-  test_gap_ranking.py  test_gaps_route.py
+  test_gap_ranking.py  test_gaps_route.py  test_hypothesis.py  test_hypothesis_route.py
 Dockerfile  docker-compose.yml  pyproject.toml  alembic.ini
 .env.example  .gitignore  .dockerignore
 ```
@@ -135,6 +143,10 @@ synchronous), `feedparser` (stdlib `xml.etree.ElementTree` parses arXiv's Atom).
 | 2026-08-17 | Candidates keyed on the **ordered** pair, unlike part 1's undirected triads | "A improves B" and "B improves A" are different claims. Cost: a disagreement phrased in opposite directions is missed — `ponytail:` note in `ClaimConflict` names the fix (union the reversed edge list in as context) if extraction turns out to phrase claims both ways. |
 | 2026-08-17 | **One Claude call per candidate**, not one batched call | Batching saves tokens and loses the isolation `Rules.md` asks for: one malformed reply would take the whole batch down instead of one pair. |
 | 2026-08-17 | `Contradiction` **wraps its `ClaimConflict`**; the model supplies only verdict + reasoning | Same discipline as citations and edges. The model names paper ids; ids are resolved against the candidate's own claims, and a verdict naming an unknown paper is dropped and logged rather than fabricated into a row. |
+| 2026-08-17 | Falsifiability enforced by **output shape + a deterministic guard**, not by prompting | `Phases.md` demands hypotheses be specific and falsifiable, not restatements. `Hypothesis` requires an explicit `falsifier` field — a vague restatement cannot produce one — and `restates_gap()` rejects statements contributing under 3 substantive terms beyond the gap's own wording. The guard is key-free, so it is the one part of that criterion actually machine-checked. |
+| 2026-08-17 | `hypothesize()` **finds gaps itself** rather than accepting a posted gap | A `CandidateGap` posted by a client couldn't be validated against the database — exactly the fabrication vector Phases 4–5 spent their validation code closing. Gaps must come out of `find_gaps`. |
+| 2026-08-17 | `/hypotheses` reports **`gaps_considered`**, not a `found` boolean | Distinguishes "no gaps in the graph" from "gaps found but every proposal was refused". Same size, strictly more information. |
+| 2026-08-17 | `/hypotheses` limit ceiling **10, not 50** | This path costs two Claude calls per gap (assess, then propose), so the spend guard is tighter than `/gaps`'. |
 | 2026-08-17 | `GapWorker.run(session, limit)` — **one capability, no sibling method** | `GraphWorker` set the precedent of giving `run()` the real signature rather than the protocol's `question: str`. Unlike graph, gap detection has exactly one capability, so a second method would be an abstraction nobody asked for. |
 | 2026-08-17 | `/gaps` `limit` bounded **1–50** | It governs how many Claude calls happen, so the bound is a spend guard, not input hygiene. |
 | 2026-08-17 | Gap **prescore is `bridges + distinct papers`** (missing link) / `distinct papers` (contradiction) | Two lines of arithmetic counting independent support. Explicitly a heuristic ordering, not a truth claim — weights get fitted when there's data to fit them to. Its job is bounding Claude calls, not being right. |
@@ -186,6 +198,13 @@ synchronous), `feedparser` (stdlib `xml.etree.ElementTree` parses arXiv's Atom).
 - **`app/main.py` now has six routes**, against the 2026-08-10 decision to split into
   `app/api/` at three or more. Deliberately not done inside Phase 4's parts — it would have
   buried each part's diff. Overdue as its own change.
+- **Phase 5 criterion 3 is unmeetable without a key by definition** — "at least one real gap →
+  hypothesis case reviewed for quality" requires output that has never been generated.
+- **The restatement guard catches blatant restatements, not hedges.** Measured: restatements
+  score 0–1 novel terms, real hypotheses 6–12, but "Chunk size has some effect on retrieval
+  precision" scores exactly 3 and passes. No stemming, so a hedge reusing the gap's own
+  improve/degrade wording also slips through. `ponytail:` comment names the replacement
+  (embedding distance, or an LLM judge with a rubric) once there are labelled pairs to tune on.
 - **Gap assessment has never run against the live model** — significance ratings and rationales
   are plumbing-tested only. Whether Claude can tell a real research gap from an obvious or
   extraction-artifact one is the entire value of part 3, and it is unproven.

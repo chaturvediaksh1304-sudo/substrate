@@ -7,7 +7,8 @@ from sqlalchemy import select, text
 
 from app.agents.gaps import RANK_LIMIT, CandidateGap
 from app.agents.graph import DEFAULT_DEPTH, MAX_DEPTH, GraphResult, Subgraph
-from app.agents.orchestrator import Answer, Orchestrator
+from app.agents.hypothesis import HYPOTHESIS_LIMIT
+from app.agents.orchestrator import Answer, Hypotheses, Orchestrator
 from app.agents.synthesis import MissingAPIKeyError
 from app.db import SessionLocal, engine
 from app.ingestion.pipeline import IngestResult, ingest_topic
@@ -115,3 +116,29 @@ def find_gaps(request: GapsRequest) -> list[CandidateGap]:
         except anthropic.APIError as exc:
             log.error("gaps: Claude call failed: %s", exc)
             raise HTTPException(503, "Claude is unavailable; gaps were not detected")
+
+
+class HypothesesRequest(BaseModel):
+    # Two Claude calls per gap here (assess, then propose), so the ceiling is RANK_LIMIT
+    # rather than /gaps' 50: same spend, half the gaps.
+    limit: int = Field(default=HYPOTHESIS_LIMIT, ge=1, le=RANK_LIMIT)
+
+
+@app.post("/hypotheses")
+def hypothesize(request: HypothesesRequest) -> Hypotheses:
+    """Hypothesize over the top gaps in the knowledge graph.
+
+    No gap, or no proposal that survived validation, is a 200 with an empty list —
+    `gaps_considered` says which of the two it was.
+    """
+    with SessionLocal() as session:
+        try:
+            return orchestrator.hypothesize(session, request.limit)
+        except MissingAPIKeyError as exc:
+            log.error("hypotheses: %s", exc)
+            raise HTTPException(
+                503, "ANTHROPIC_API_KEY is not configured; /hypotheses is unavailable"
+            )
+        except anthropic.APIError as exc:
+            log.error("hypotheses: Claude call failed: %s", exc)
+            raise HTTPException(503, "Claude is unavailable; no hypotheses were generated")
