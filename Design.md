@@ -2,13 +2,13 @@
 
 No UI yet. Substrate is backend/API-only through Phase 6, which is now built — so this file
 becomes live at Phase 7, whatever form that client takes (a macOS app was raised on
-2026-08-17 and is undecided; see Memory.md).
+2026-08-25 and is undecided; see Memory.md).
 
 ## Standard we build UI against
 
 **Vercel Web Interface Guidelines** — https://raw.githubusercontent.com/vercel-labs/web-interface-guidelines/main/command.md
 
-Adopted 2026-08-17. Not vendored here on purpose: it lives at a stable canonical URL, and a
+Adopted 2026-08-25. Not vendored here on purpose: it lives at a stable canonical URL, and a
 copy in this repo would silently drift from the source. Fetch it when doing UI work.
 
 **Superseded in practice by the packaged form.** `vercel-labs/agent-skills` ships this same
@@ -33,7 +33,7 @@ client — or it means writing the SwiftUI equivalents by hand.
 
 **Impeccable** — https://github.com/pbakaus/impeccable · https://impeccable.style
 
-Adopted 2026-08-17. A design-guidance toolkit for AI coding agents: one skill, 23 commands
+Adopted 2026-08-25. A design-guidance toolkit for AI coding agents: one skill, 23 commands
 (`init`, `shape`, `craft`, `critique`, `audit`, `polish`, `harden`, `animate`, `typeset`,
 `layout`, `distill`, and more), and 59 deterministic detector rules that run without an LLM
 or API key. It exists to defeat the house style every model defaults to — Inter everywhere,
@@ -63,7 +63,7 @@ above applies to Impeccable equally.
 
 **awesome-design-md** — https://github.com/VoltAgent/awesome-design-md
 
-Adopted 2026-08-17. 73 ready-made `DESIGN.md` files reverse-engineered from real websites,
+Adopted 2026-08-25. 73 ready-made `DESIGN.md` files reverse-engineered from real websites,
 grouped by category (AI/LLM platforms, developer tools, backend/DevOps, SaaS, fintech, and
 more). Each follows Google Stitch's `DESIGN.md` spec: visual theme, color palette with hex and
 semantic roles, a full type hierarchy, component styling with states, spacing and grid, an
@@ -84,7 +84,7 @@ goes native, this is the standard that still earns its keep.
 **vercel-labs/agent-skills** — https://github.com/vercel-labs/agent-skills · install with
 `npx skills add vercel-labs/agent-skills`
 
-Adopted 2026-08-17. Eight skills in the [agentskills.io](https://agentskills.io/) format.
+Adopted 2026-08-25. Eight skills in the [agentskills.io](https://agentskills.io/) format.
 **Not installed** — needs approval and a harness reload, same as Impeccable.
 
 | Skill | Useful to Substrate when |
@@ -103,7 +103,7 @@ detectors, the great majority of adopted tooling assumes a React/Next web client
 
 ## The stack decision now gates four adopted standards
 
-As of 2026-08-17, four design/tooling resources are adopted and the client stack is still
+As of 2026-08-25, four design/tooling resources are adopted and the client stack is still
 undecided (macOS app raised, questions asked, unanswered). What each is worth depends entirely
 on that choice:
 
@@ -113,7 +113,7 @@ on that choice:
 | Tauri / Electron | full value | full value | full value | most value |
 | **Native SwiftUI** | translate by hand | detectors don't run | **still works** | `writing-guidelines` only |
 
-**Correction, 2026-08-17:** the SwiftUI column above understates the case. 122 skills are
+**Correction, 2026-08-25:** the SwiftUI column above understates the case. 122 skills are
 installed globally, and they include **`write-swift`** (modern Swift 6 — value types,
 concurrency and data-race safety, protocols/generics, Swift Testing, ARC and performance) plus
 `apple-design` (Apple's interface and motion principles) and `emil-design-eng` (UI craft
