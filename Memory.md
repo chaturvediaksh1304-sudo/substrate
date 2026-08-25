@@ -140,6 +140,13 @@ data-race safety, concurrency, Swift Testing, ARC), `apple-design` (principles, 
 `emil-design-eng` (craft philosophy). Plus the iOS/device skills for Phase 9:
 `ios-qa`, `ios-fix`, `ios-design-review`, `animate-expo`, `imagegen-frontend-mobile`.
 
+**`aso`** (alexszczurek/before-skills) installed 2026-08-25 — iOS App Store listing
+optimization: name, subtitle, keyword field, screenshots, icon, ratings, featuring
+nominations. **No bearing on Substrate until Phase 9** (mobile app, last in sequence). Partial
+overlap with a Mac App Store listing if the macOS client ships there rather than direct
+download — the skill is iOS-specific (Liquid Glass icons, iOS screenshot indexing, App Store
+tags), so treat it as adjacent, not applicable.
+
 **Verified 2026-08-25** against Aksh's install log: all 63 skills from `mattpocock/skills`
 (37), `Leonxlnx/taste-skill` (13), `emilkowalski/skills` (12), `vercel-labs/skills`
 (`find-skills`), and `playwright-cli` are present in `~/.claude/skills`. Nothing missing.
