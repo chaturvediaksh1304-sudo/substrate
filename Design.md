@@ -54,6 +54,40 @@ can overwrite everything here. Back this file up before running it.
 They complement rather than overlap. Both are **web-frontend** tools, so the SwiftUI caveat
 above applies to Impeccable equally.
 
+## Design language source: awesome-design-md
+
+**awesome-design-md** — https://github.com/VoltAgent/awesome-design-md
+
+Adopted 2026-08-17. 73 ready-made `DESIGN.md` files reverse-engineered from real websites,
+grouped by category (AI/LLM platforms, developer tools, backend/DevOps, SaaS, fintech, and
+more). Each follows Google Stitch's `DESIGN.md` spec: visual theme, color palette with hex and
+semantic roles, a full type hierarchy, component styling with states, spacing and grid, an
+elevation system, do's and don'ts, responsive behaviour, and an agent prompt guide. Each ships
+with `preview.html` and `preview-dark.html` catalogs.
+
+Used by picking a site whose design language suits Substrate and seeding our `DESIGN.md` from
+it — a starting point, not a final identity. **Consequence worth naming:** adopt one wholesale
+and Substrate looks like that company. It's a floor to build from, not the brand.
+
+**Unlike the other two, this one largely survives a native port.** Color, type scale, spacing,
+elevation and do's/don'ts are platform-agnostic design decisions that translate to SwiftUI
+fine. Only the responsive-behaviour and CSS-component sections are web-bound. If the Mac app
+goes native, this is the standard that still earns its keep.
+
+## One file, three writers — resolve before running anything
+
+`DESIGN.md` is now contested:
+
+1. **This file.** macOS filesystems are case-insensitive, so `Design.md` and `DESIGN.md` are
+   the same file.
+2. **Impeccable's `/impeccable init`** writes `DESIGN.md`.
+3. **awesome-design-md** says copy a `DESIGN.md` into the project root.
+
+All three want the same thing in the same place, so the intent doesn't conflict — the risk is
+purely **overwrite**. Order that works: seed from an awesome-design-md pick, refine with
+Impeccable, keep the standards sections above intact at the top. Back this file up before
+running `init` or pasting anything over it.
+
 ## Still to decide at Phase 7
 
 Visual tone, color palette, typography, light/dark mode, and any brand carryover from
