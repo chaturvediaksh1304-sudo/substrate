@@ -11,6 +11,11 @@ becomes live at Phase 7, whatever form that client takes (a macOS app was raised
 Adopted 2026-08-17. Not vendored here on purpose: it lives at a stable canonical URL, and a
 copy in this repo would silently drift from the source. Fetch it when doing UI work.
 
+**Superseded in practice by the packaged form.** `vercel-labs/agent-skills` ships this same
+standard as an installable `web-design-guidelines` skill (same categories, "100+ rules"). Once
+that's installed, invoke the skill rather than fetching this file — one standard, one source.
+This URL stays recorded as the canonical text behind it.
+
 It covers accessibility, focus states, forms, animation, typography, content handling, images,
 performance, navigation and URL state, touch, safe areas, dark mode, i18n, hydration, hover
 states, and copy — plus an explicit anti-pattern list. It is also written as a *review
@@ -73,6 +78,42 @@ and Substrate looks like that company. It's a floor to build from, not the brand
 elevation and do's/don'ts are platform-agnostic design decisions that translate to SwiftUI
 fine. Only the responsive-behaviour and CSS-component sections are web-bound. If the Mac app
 goes native, this is the standard that still earns its keep.
+
+## Agent skills: vercel-labs/agent-skills
+
+**vercel-labs/agent-skills** — https://github.com/vercel-labs/agent-skills · install with
+`npx skills add vercel-labs/agent-skills`
+
+Adopted 2026-08-17. Eight skills in the [agentskills.io](https://agentskills.io/) format.
+**Not installed** — needs approval and a harness reload, same as Impeccable.
+
+| Skill | Useful to Substrate when |
+|---|---|
+| `writing-guidelines` | **Now.** Audits docs/prose against the Vercel writing handbook — 80+ rules on voice, structure, code samples, typography. The only skill across all four resources that applies to this repo as it exists today. |
+| `web-design-guidelines` | Phase 7. Packaged form of the standard above. |
+| `react-best-practices` | Phase 7, if React. Already present in this session as `vercel:react-best-practices` via the Vercel plugin. |
+| `composition-patterns` | Phase 7, if React. |
+| `react-view-transitions` | Phase 7, if React/Next. |
+| `react-native-guidelines` | Phase 9 (mobile), if React Native. |
+| `vercel-optimize` | Only if Substrate deploys to Vercel — undecided, and `Architecture.md` currently says Docker self-hosted. |
+| `vercel-deploy-claimable` | Same. |
+
+**Six of the eight are React-specific.** Combined with the Vercel guidelines and Impeccable's
+detectors, the great majority of adopted tooling assumes a React/Next web client. See below.
+
+## The stack decision now gates four adopted standards
+
+As of 2026-08-17, four design/tooling resources are adopted and the client stack is still
+undecided (macOS app raised, questions asked, unanswered). What each is worth depends entirely
+on that choice:
+
+| If the client is… | Vercel guidelines | Impeccable | awesome-design-md | agent-skills |
+|---|---|---|---|---|
+| React / Next web | full value | full value | full value | full value |
+| Tauri / Electron | full value | full value | full value | most value |
+| **Native SwiftUI** | translate by hand | detectors don't run | **still works** | `writing-guidelines` only |
+
+Worth settling the stack before investing further in tooling that may not apply.
 
 ## One file, three writers — resolve before running anything
 
