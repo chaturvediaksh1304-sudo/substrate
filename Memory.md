@@ -111,6 +111,44 @@ Docs: `README.md`, `PRD.md`, `Architecture.md`, `Rules.md`, `Phases.md`, `Design
 
 Repo: https://github.com/chaturvediaksh1304-sudo/substrate — public, `main`, pushed 2026-08-12.
 
+## Skills available (installed globally, 2026-08-17)
+
+122 skills in `~/.claude/skills`, none project-local. **Nothing to install or configure** —
+they activate on description match. The value is knowing which apply here, not the inventory.
+
+**Useful to Substrate now (backend, stack-agnostic):**
+
+| Skill | Why here |
+|---|---|
+| `tdd` | `Rules.md` mandates test-first for every phase; this is the reference for what makes a test worth keeping |
+| `codebase-design` | Deep-module vocabulary — relevant to the overdue `app/api/` split |
+| `domain-modeling` | Concept/gap/hypothesis vocabulary is load-bearing across Phases 3–6; also covers `CONTEXT.md` and ADRs |
+| `diagnosing-bugs` | Diagnosis loop for hard bugs and perf regressions |
+| `writing-for-agents` | Writing docs *for* agents — directly applicable to this file and `CLAUDE.md` |
+| `research` | Investigate against primary sources, capture as Markdown in-repo |
+| `grilling` | Stress-test a plan or decision — e.g. the open client-stack question |
+| `writing-guidelines` (agent-skills) | Prose/doc audit; not installed yet |
+
+**Phase 7, if the client is web/React:** `design-taste-frontend`, `apple-design`,
+`apple-liquid-glass`, `emil-design-eng`, `animate`, `review-animations`,
+`find-animation-opportunities`, `improve-animations`, `animation-vocabulary`, `ask-sonner`,
+`pick-ui-library`, `prototype`, `stitch-design-taste`, `redesign-existing-projects`,
+`image-to-code`, `imagegen-frontend-web`, plus the `vercel:*` plugin skills.
+
+**Phase 7, if the client is native macOS:** **`write-swift`** (Swift 6 — value types,
+data-race safety, concurrency, Swift Testing, ARC), `apple-design` (principles, web-worded),
+`emil-design-eng` (craft philosophy). Plus the iOS/device skills for Phase 9:
+`ios-qa`, `ios-fix`, `ios-design-review`, `animate-expo`, `imagegen-frontend-mobile`.
+
+**Attribution** (by content; no provenance manifest on disk): mattpocock — `tdd`,
+`codebase-design`, `domain-modeling`, `diagnosing-bugs`, `prototype`, `research`, `grilling`,
+`writing-for-agents`, `wizard`, `setup-pre-commit`, `pick-ui-library`, `ask-matt`,
+`improve-codebase-architecture`, `setup-ts-deep-modules`. emilkowalski — `animate`,
+`animate-expo`, `animation-vocabulary`, `apple-design`, `ask-sonner`, `emil-design-eng`,
+`review-animations`, `find-animation-opportunities`, `improve-animations`, `write-swift`.
+Leonxlnx/taste-skill — `design-taste-frontend`, `design-taste-frontend-v1`. gstack — the
+`ship`/`review`/`qa`/`spec`/`browse` family. vercel-labs — via the plugin, not this folder.
+
 ## Dependencies
 
 Runtime: fastapi, uvicorn[standard], sqlalchemy, alembic, psycopg[binary], pgvector,

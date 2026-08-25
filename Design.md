@@ -113,6 +113,14 @@ on that choice:
 | Tauri / Electron | full value | full value | full value | most value |
 | **Native SwiftUI** | translate by hand | detectors don't run | **still works** | `writing-guidelines` only |
 
+**Correction, 2026-08-17:** the SwiftUI column above understates the case. 122 skills are
+installed globally, and they include **`write-swift`** (modern Swift 6 — value types,
+concurrency and data-race safety, protocols/generics, Swift Testing, ARC and performance) plus
+`apple-design` (Apple's interface and motion principles) and `emil-design-eng` (UI craft
+philosophy). Those are real support for a native client that the four adopted web resources
+don't provide. Native SwiftUI is better-equipped than the table alone suggests — the gap is
+narrower than "translate everything by hand".
+
 Worth settling the stack before investing further in tooling that may not apply.
 
 ## One file, three writers — resolve before running anything
