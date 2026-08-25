@@ -6,9 +6,10 @@ changed — not at phase boundaries (`Rules.md:31`).
 > **Note:** this structure is a stand-in. Aksh has a template to supply; replace this layout
 > with it when it arrives, keeping the content.
 
-**Last updated:** 2026-08-17 — **Phase 5 built** (both parts): hypothesis generation,
-`HypothesisWorker`, `POST /hypotheses`. 172 tests pass, 1 skips. Every LLM-free half is
-verified live; every Claude path is plumbing-tested only, still awaiting `ANTHROPIC_API_KEY`.
+**Last updated:** 2026-08-17 — **Phase 6 built: the backend arc is structurally complete.**
+Experiment design, `ExperimentWorker`, `POST /experiments`. 215 tests pass, 1 skips; eight
+routes; five worker agents under the orchestrator. Every LLM-free half is verified live; every
+Claude path is plumbing-tested only, still awaiting `ANTHROPIC_API_KEY`.
 
 **Corpus:** 55 papers, 107 chunks, all arXiv (Semantic Scholar still 429s). Topics: retrieval
 augmented generation (~50), protein folding diffusion models (5). Graph tables hold only 4
@@ -26,7 +27,8 @@ the first real extraction run so seeded rows can't be mistaken for extracted one
 | 3 — Knowledge graph | ⚠️ Built, all three done-criteria met — extraction *quality* unproven (no API key) |
 | 4 — Gap detection | ⚠️ All 4 parts built, three done-criteria met structurally — gap *quality* unproven (no API key) |
 | 5 — Hypothesis generation | ⚠️ Built, 2/3 criteria met structurally — criterion 3 ("reviewed for quality") is unmeetable without a key |
-| 6–9 | Not started |
+| 6 — Experiment design | ⚠️ Built, criterion 1 met structurally — criterion 2 ("reviewed for usefulness") needs a key |
+| 7–9 | Not started. **A macOS app was raised on 2026-08-17** and is not in `Phases.md`; questions asked, deferred, undecided |
 
 **Phase 4 is split into 4 parts**, ordered so the LLM-free part lands first:
 1. ✅ Structural gap detection — open triads, pure SQL, verifiable without a key
@@ -41,8 +43,8 @@ app/
   __init__.py
   main.py            GET /health (DB-backed), POST /ingest, POST /ask,
                      POST /graph/build, POST /graph/traverse, POST /gaps,
-                     POST /hypotheses
-                     — seven routes; the "split at three" decision below is overdue
+                     POST /hypotheses, POST /experiments
+                     — eight routes; the "split at three" decision below is overdue
   config.py          DATABASE_URL required (fails loud); EMBEDDING_DIM=384;
                      ANTHROPIC_API_KEY optional at startup, required at use; ANTHROPIC_MODEL
   db.py              engine, SessionLocal, Base
@@ -64,9 +66,10 @@ app/
     orchestrator.py  Worker protocol; Orchestrator.answer(session, question, k=5) -> Answer;
                      Orchestrator.relate(session, concept, depth=2) -> Subgraph;
                      Orchestrator.find_gaps(session, limit=10) -> [CandidateGap];
-                     Orchestrator.hypothesize(session, limit=3) -> Hypotheses.
+                     Orchestrator.hypothesize(session, limit=3) -> Hypotheses;
+                     Orchestrator.design_experiments(session, limit=2) -> Experiments.
                      Defaults register RetrievalWorker + GraphWorker + GapWorker
-                     + HypothesisWorker
+                     + HypothesisWorker + ExperimentWorker
     gaps.py          find_open_triads(session, min_papers=1, limit=50) -> [StructuralGap];
                      one SQL self-join over an undirected edge view. No LLM.
                      find_conflicting_claims(session, limit=50) -> [ClaimConflict];
@@ -82,6 +85,11 @@ app/
                      (statement, manipulation, measurement, predicted_effect, falsifier,
                      papers from rows). restates_gap()/novel_terms() — deterministic
                      restatement guard, no LLM. HypothesisWorker.run(session, gap).
+    experiment.py    design_experiment(session, hypothesis) -> ExperimentDesign | None;
+                     ExperimentDesign (method, manipulated, measured, controlled,
+                     expected_outcome, discriminating_outcome, papers from rows).
+                     shared_terms()/measures_something_else() — deterministic
+                     testability guard, no LLM. ExperimentWorker.run(session, hypothesis).
     graph.py         GraphWorker.run(session, papers) -> GraphResult; LLM concept +
                      edge extraction, validated before persistence.
                      GraphWorker.traverse / traverse(session, concept, depth=2) -> Subgraph;
@@ -94,6 +102,7 @@ tests/
   test_retrieval.py  test_synthesis.py  test_orchestrator.py  test_ask.py
   test_graph_extraction.py  test_graph_traversal.py  test_gaps.py  test_contradictions.py
   test_gap_ranking.py  test_gaps_route.py  test_hypothesis.py  test_hypothesis_route.py
+  test_experiment.py  test_experiment_route.py
 Dockerfile  docker-compose.yml  pyproject.toml  alembic.ini
 .env.example  .gitignore  .dockerignore
 ```
@@ -143,6 +152,10 @@ synchronous), `feedparser` (stdlib `xml.etree.ElementTree` parses arXiv's Atom).
 | 2026-08-17 | Candidates keyed on the **ordered** pair, unlike part 1's undirected triads | "A improves B" and "B improves A" are different claims. Cost: a disagreement phrased in opposite directions is missed — `ponytail:` note in `ClaimConflict` names the fix (union the reversed edge list in as context) if extraction turns out to phrase claims both ways. |
 | 2026-08-17 | **One Claude call per candidate**, not one batched call | Batching saves tokens and loses the isolation `Rules.md` asks for: one malformed reply would take the whole batch down instead of one pair. |
 | 2026-08-17 | `Contradiction` **wraps its `ClaimConflict`**; the model supplies only verdict + reasoning | Same discipline as citations and edges. The model names paper ids; ids are resolved against the candidate's own claims, and a verdict naming an unknown paper is dropped and logged rather than fabricated into a row. |
+| 2026-08-17 | Testability enforced by a guard running **opposite** to Phase 5's | Phase 5's failure mode is a hypothesis restating the gap, so `restates_gap` demands *new* terms. Phase 6's is a design not testing the hypothesis, so `measures_something_else` demands *overlapping* terms — separately on manipulated↔manipulation and measured↔measurement, so a design that varies the right thing but measures its latency is caught. Measured: on-target overlap floors at 3, off-target ceilings at 1; threshold 2 sits in the empty band. |
+| 2026-08-17 | `ExperimentDesign` requires a **`discriminating_outcome`** | The result that comes out the other way. A design that can't produce the hypothesis's falsifier isn't a test of it. |
+| 2026-08-17 | `/experiments` limit ceiling **5**, default 2 | Three Claude calls per gap (assess, propose, design) — the tightest spend guard in the codebase. 5×3=15 stays under `/hypotheses`' 10×2=20 ceiling. |
+| 2026-08-17 | `Experiments` reports **two counts**, not one | Distinguishes "no gaps" from "gaps but no hypothesis survived" from "hypotheses but no design survived the guard" — three genuinely different outcomes. |
 | 2026-08-17 | Falsifiability enforced by **output shape + a deterministic guard**, not by prompting | `Phases.md` demands hypotheses be specific and falsifiable, not restatements. `Hypothesis` requires an explicit `falsifier` field — a vague restatement cannot produce one — and `restates_gap()` rejects statements contributing under 3 substantive terms beyond the gap's own wording. The guard is key-free, so it is the one part of that criterion actually machine-checked. |
 | 2026-08-17 | `hypothesize()` **finds gaps itself** rather than accepting a posted gap | A `CandidateGap` posted by a client couldn't be validated against the database — exactly the fabrication vector Phases 4–5 spent their validation code closing. Gaps must come out of `find_gaps`. |
 | 2026-08-17 | `/hypotheses` reports **`gaps_considered`**, not a `found` boolean | Distinguishes "no gaps in the graph" from "gaps found but every proposal was refused". Same size, strictly more information. |
@@ -198,6 +211,12 @@ synchronous), `feedparser` (stdlib `xml.etree.ElementTree` parses arXiv's Atom).
 - **`app/main.py` now has six routes**, against the 2026-08-10 decision to split into
   `app/api/` at three or more. Deliberately not done inside Phase 4's parts — it would have
   buried each part's diff. Overdue as its own change.
+- **Phase 6 criterion 2 is unmeetable without a key** — "reviewed against at least one real
+  hypothesis from Phase 5 for usefulness" needs output that has never been generated.
+- **The testability guard has no stemming**, so `retrieval` ≠ `retriever` — an honest design can
+  be rejected on wording. Overlap is also not aboutness: a design could echo the nouns without
+  varying them. `ponytail:` comment names the upgrade (embedding distance, or an LLM judge
+  asked whether the procedure could actually produce the falsifier).
 - **Phase 5 criterion 3 is unmeetable without a key by definition** — "at least one real gap →
   hypothesis case reviewed for quality" requires output that has never been generated.
 - **The restatement guard catches blatant restatements, not hedges.** Measured: restatements

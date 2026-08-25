@@ -4,6 +4,11 @@ from typing import Any, Callable, Protocol, Sequence
 
 from sqlalchemy.orm import Session
 
+from app.agents.experiment import (
+    EXPERIMENT_LIMIT,
+    ExperimentDesign,
+    ExperimentWorker,
+)
 from app.agents.gaps import RANK_LIMIT, CandidateGap, GapWorker
 from app.agents.graph import DEFAULT_DEPTH, GraphWorker, Subgraph
 from app.agents.hypothesis import HYPOTHESIS_LIMIT, Hypothesis, HypothesisWorker
@@ -40,6 +45,21 @@ class Hypotheses:
 
 
 @dataclass
+class Experiments:
+    """Designs off the top gaps, plus how far the chain got before it ran out.
+
+    Three counts because there are three ways to come back empty, and a caller should not
+    have to read prose to tell them apart: `gaps_considered` 0 means the graph held no gaps;
+    gaps but `hypotheses_considered` 0 means no proposal survived the restatement guard;
+    hypotheses but no `designs` means no design survived the testability guard.
+    """
+
+    gaps_considered: int
+    hypotheses_considered: int
+    designs: list[ExperimentDesign]
+
+
+@dataclass
 class Answer:
     question: str
     answer: str
@@ -58,7 +78,13 @@ class Orchestrator:
         workers: Sequence[Worker] | None = None,
         synthesize_fn: Callable[..., Any] = synthesize,
     ):
-        default = [RetrievalWorker(), GraphWorker(), GapWorker(), HypothesisWorker()]
+        default = [
+            RetrievalWorker(),
+            GraphWorker(),
+            GapWorker(),
+            HypothesisWorker(),
+            ExperimentWorker(),
+        ]
         self.workers = {worker.name: worker for worker in workers or default}
         self.synthesize = synthesize_fn
 
@@ -107,4 +133,33 @@ class Orchestrator:
         return Hypotheses(
             gaps_considered=len(gaps),
             hypotheses=[hypothesis for hypothesis in found if hypothesis is not None],
+        )
+
+    def design_experiments(
+        self, session: Session, limit: int = EXPERIMENT_LIMIT
+    ) -> Experiments:
+        """Gaps, then a hypothesis per gap, then an experiment per hypothesis. All via workers.
+
+        The entry point is the corpus for the same reason `hypothesize`'s is: a `Hypothesis`
+        carries a `CandidateGap` and real paper rows, so a caller cannot hand one in — it
+        comes out of the chain. This reuses `hypothesize` rather than re-walking the first
+        two hops, so every hop still goes through `self.workers`.
+
+        `limit` is one knob for all three hops, and it is the tightest spend guard in the
+        codebase because the chain costs three Claude calls per gap: capping the gaps caps
+        the hypotheses, which caps the designs. Assessing gaps nobody will design over is
+        spend with nothing to show for it.
+
+        A hypothesis the model produces no testable design for is dropped, not raised on —
+        `design_experiment`'s contract — and the counts keep the drop visible.
+        """
+        found = self.hypothesize(session, limit)
+        designs = [
+            self.workers["experiment"].run(session, hypothesis)
+            for hypothesis in found.hypotheses
+        ]
+        return Experiments(
+            gaps_considered=found.gaps_considered,
+            hypotheses_considered=len(found.hypotheses),
+            designs=[design for design in designs if design is not None],
         )

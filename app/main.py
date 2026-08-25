@@ -5,10 +5,11 @@ from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel, Field
 from sqlalchemy import select, text
 
+from app.agents.experiment import EXPERIMENT_LIMIT, MAX_EXPERIMENTS
 from app.agents.gaps import RANK_LIMIT, CandidateGap
 from app.agents.graph import DEFAULT_DEPTH, MAX_DEPTH, GraphResult, Subgraph
 from app.agents.hypothesis import HYPOTHESIS_LIMIT
-from app.agents.orchestrator import Answer, Hypotheses, Orchestrator
+from app.agents.orchestrator import Answer, Experiments, Hypotheses, Orchestrator
 from app.agents.synthesis import MissingAPIKeyError
 from app.db import SessionLocal, engine
 from app.ingestion.pipeline import IngestResult, ingest_topic
@@ -142,3 +143,29 @@ def hypothesize(request: HypothesesRequest) -> Hypotheses:
         except anthropic.APIError as exc:
             log.error("hypotheses: Claude call failed: %s", exc)
             raise HTTPException(503, "Claude is unavailable; no hypotheses were generated")
+
+
+class ExperimentsRequest(BaseModel):
+    # Three Claude calls per gap here (assess, propose, then design), so the ceiling drops
+    # again: 5 x 3 stays under /hypotheses' 10 x 2, which stays under /gaps' 50 x 1.
+    limit: int = Field(default=EXPERIMENT_LIMIT, ge=1, le=MAX_EXPERIMENTS)
+
+
+@app.post("/experiments")
+def design_experiments(request: ExperimentsRequest) -> Experiments:
+    """Design an experiment per hypothesis, off the top gaps in the knowledge graph.
+
+    Empty is a 200 three different ways, and the counts say which: no gap at all, no
+    hypothesis that survived, or no design that survived.
+    """
+    with SessionLocal() as session:
+        try:
+            return orchestrator.design_experiments(session, request.limit)
+        except MissingAPIKeyError as exc:
+            log.error("experiments: %s", exc)
+            raise HTTPException(
+                503, "ANTHROPIC_API_KEY is not configured; /experiments is unavailable"
+            )
+        except anthropic.APIError as exc:
+            log.error("experiments: Claude call failed: %s", exc)
+            raise HTTPException(503, "Claude is unavailable; no experiments were designed")
