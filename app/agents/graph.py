@@ -22,15 +22,26 @@ MAX_TOKENS = 2000
 DEFAULT_DEPTH = 2
 MAX_DEPTH = 4
 
+# An abstract states one or two claims. The first real run averaged ~15 concepts a paper
+# and 75% of them were orphans, so the ceiling is set where a connected graph is still
+# plausible: 8 concepts is four edges' worth of endpoints.
+MAX_CONCEPTS = 8
+
 SYSTEM = (
     "You extract a knowledge graph from a paper's title and abstract.\n"
     "Reply with JSON only, in exactly this shape:\n"
     '{"concepts": ["concept name", ...], '
     '"edges": [{"source": "concept name", "relation": "verb phrase", '
     '"target": "concept name", "evidence": "sentence from the abstract"}, ...]}\n'
-    "Concepts are short noun phrases the paper is actually about.\n"
+    f"At most {MAX_CONCEPTS} concepts, each a short noun phrase naming an idea, method or "
+    "problem. Prefer terms the wider field already uses over anything only this paper names.\n"
+    "Never a dataset, benchmark, metric or leaderboard name, and never a bare fragment that "
+    'is not a concept on its own, e.g. "patch level".\n'
+    "One form per concept: if the paper gives both an acronym and its expansion, pick one "
+    "and use it everywhere.\n"
     'A relation is a short verb phrase, e.g. "improves", "contradicts", "builds on".\n'
-    "Every edge's source and target must appear verbatim in the concepts list.\n"
+    "Every edge's source and target must appear verbatim in the concepts list, and every "
+    "concept must appear in at least one edge — drop any you cannot connect.\n"
     "Evidence must be quoted from the title or abstract, never paraphrased or invented.\n"
     "No prose, no markdown fences, no explanation."
 )
@@ -208,6 +219,13 @@ def _extract_paper(session: Session, paper: Paper, result: GraphResult) -> None:
     """One paper, one transaction — so a bad extraction costs only its own rows."""
     try:
         concepts, edges = _validate(_ask_claude(paper))
+        # Declare -> filter edges -> drop the unconnected -> persist. A concept nothing
+        # says anything about is noise, not a node; declining to create its row here
+        # never touches a row another paper's edges already earned.
+        used = {end for e in edges for end in (e["source"], e["target"])}
+        if orphans := concepts.keys() - used:
+            log.info("graph: dropping %d unconnected concept(s): %s", len(orphans), sorted(orphans))
+        concepts = {n: name for n, name in concepts.items() if n in used}
         ids = {}
         for normalized, name in concepts.items():
             concept_id, created = _concept_id(session, normalized, name)

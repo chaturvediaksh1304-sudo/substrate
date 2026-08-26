@@ -243,3 +243,106 @@ def test_missing_api_key_still_fails_loud(db_session, monkeypatch):
 
     with pytest.raises(MissingAPIKeyError):
         graph.GraphWorker().run(db_session, [paper])
+
+
+# --- connectivity: a concept nothing says anything about is not a concept ------
+
+
+def test_concepts_no_edge_uses_are_not_persisted(db_session, monkeypatch):
+    """Orphans are 75% of a real run's output. Declared-but-unused must not reach the DB."""
+    paper = add_paper(db_session, **ATTENTION)
+    fake_client(
+        monkeypatch,
+        reply(
+            [
+                "self-attention",
+                "recurrence",
+                "Midjourney-30K",
+                "GenEval",
+                "patch level",
+            ],
+            [
+                edge("self-attention", "replaces", "recurrence"),
+                edge("recurrence", "predates", "self-attention"),
+            ],
+        ),
+    )
+
+    result = graph.GraphWorker().run(db_session, [paper])
+
+    assert result.concepts_created == 2
+    assert result.edges_created == 2
+    assert sorted(
+        c.normalized for c in db_session.execute(select(Concept)).scalars()
+    ) == ["recurrence", "self-attention"]
+
+
+def test_paper_whose_edges_are_all_invalid_persists_no_concepts(db_session, monkeypatch):
+    """Every edge dropped means nothing survived to connect to — so nothing is written."""
+    paper = add_paper(db_session, **ATTENTION)
+    fake_client(
+        monkeypatch,
+        reply(
+            ["self-attention", "recurrence"],
+            [edge("self-attention", "improves", "quantum tunnelling")],
+        ),
+    )
+
+    result = graph.GraphWorker().run(db_session, [paper])
+
+    # The call succeeded and the JSON parsed — nothing failed, it just yielded nothing.
+    assert (result.papers_processed, result.papers_failed) == (1, 0)
+    assert (result.concepts_created, result.edges_created) == (0, 0)
+    assert counts(db_session) == (0, 0)
+
+
+def test_declaring_an_existing_concept_without_using_it_does_not_delete_it(
+    db_session, monkeypatch
+):
+    """Dropping a concept is declining to create a row, never removing another paper's."""
+    attention, bert = add_paper(db_session, **ATTENTION), add_paper(db_session, **BERT)
+    fake_client(
+        monkeypatch,
+        reply(
+            ["self-attention", "recurrence"],
+            [edge("self-attention", "replaces", "recurrence")],
+        ),
+        reply(
+            ["bidirectional pre-training", "masked language modelling", "recurrence"],
+            [edge("bidirectional pre-training", "uses", "masked language modelling")],
+        ),
+    )
+
+    graph.GraphWorker().run(db_session, [attention, bert])
+
+    survivors = sorted(c.normalized for c in db_session.execute(select(Concept)).scalars())
+    assert survivors == [
+        "bidirectional pre-training",
+        "masked language modelling",
+        "recurrence",
+        "self-attention",
+    ]
+    still_there = db_session.execute(
+        select(ConceptEdge).where(ConceptEdge.paper_id == attention.id)
+    ).scalars().all()
+    assert len(still_there) == 1
+
+
+# --- the prompt carries the same constraints the code enforces ----------------
+
+
+def test_prompt_states_the_extraction_constraints(db_session, monkeypatch):
+    paper = add_paper(db_session, **ATTENTION)
+    messages = fake_client(
+        monkeypatch,
+        reply(["self-attention", "recurrence"], [edge("self-attention", "replaces", "recurrence")]),
+    )
+
+    graph.GraphWorker().run(db_session, [paper])
+
+    system = messages.calls[0]["system"]
+    assert f"At most {graph.MAX_CONCEPTS} concepts" in system
+    for forbidden in ("dataset", "benchmark", "metric"):
+        assert forbidden in system
+    assert "acronym" in system
+    assert "must appear in at least one edge" in system

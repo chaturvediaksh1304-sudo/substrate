@@ -357,6 +357,23 @@ synchronous), `feedparser` (stdlib `xml.etree.ElementTree` parses arXiv's Atom).
 - **Gap assessment has never run against the live model** — significance ratings and rationales
   are plumbing-tested only. Whether Claude can tell a real research gap from an obvious or
   extraction-artifact one is the entire value of part 3, and it is unproven.
+- **Extraction quality, measured 2026-08-25 against `qwen2.5:7b-instruct` (first real run):**
+  Before the fixes — 3 papers → 44 concepts / 7 edges, **75% orphans**, 0 cross-paper links.
+  After `MAX_CONCEPTS=8` + the orphan guard — 2 fresh papers → 13 concepts / 16 edges,
+  **0 orphans**, edges now outnumber concepts.
+- **Cross-paper linking is still 0 and is the real blocker for Phases 3–6.** The same concept
+  surfaces as `RAG`, `retrieval-augmented generation (RAG)`, `Large Language Model`,
+  `large language model (LLM)`, `large language models` — variants that normalize differently,
+  so they become separate nodes. The only multi-paper concept in the graph is `protein folding`,
+  which is a hand-seeded fixture, not extracted. **Root cause: extraction is per-paper and
+  stateless**, so no canonical vocabulary can emerge. Three fixes, cheapest first: harden
+  `normalize()` (strip parentheticals, singularize); resolve entities post-hoc using the
+  fastembed embeddings already in the project; or show the model the existing concept
+  vocabulary during extraction so it reuses terms.
+- **`POST /graph/build` can only ever process papers 1..N** — it does `ORDER BY id LIMIT n`, so
+  there is no way to extract paper 4 without re-processing 1–3, and no way to resume. With 55
+  papers this needs a cursor or an "unprocessed only" filter.
+- 32 legacy orphan concepts remain from the pre-fix run; the fixed extraction creates none.
 - **Concept extraction has never run against the live model** — same `ANTHROPIC_API_KEY` gap as
   Phase 2. Extraction *quality* is therefore unproven; only its plumbing is tested.
   `POST /graph/build` correctly returns 503 today.
