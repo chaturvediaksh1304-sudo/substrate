@@ -3,24 +3,31 @@
 An AI research assistant that takes a research question, searches and synthesizes across
 academic papers, and answers with citations back to real sources.
 
-The longer goal is the full research loop — connect concepts across papers, surface gaps and
-contradictions in the literature, form hypotheses, and design experiments to test them.
-Today it does the first half of that: ingestion and cited Q&A.
+It goes further than Q&A: it builds a concept graph across papers, finds gaps and
+contradictions in that graph, proposes falsifiable hypotheses from them, and turns those into
+structured experiment designs.
 
 ## Status
 
 | Phase | | |
 |---|---|---|
 | 1 | Foundation & ingestion | ✅ Verified |
-| 2 | RAG Q&A | ⚠️ Built; the live `/ask` path needs an API key to verify |
-| 3 | Knowledge graph (Neo4j) | Not started |
-| 4 | Gap detection | Not started |
-| 5 | Hypothesis generation | Not started |
-| 6 | Experiment design | Not started |
-| 7–9 | Web UI, auth, mobile | Not started |
+| 2 | RAG Q&A | ⚠️ Built |
+| 3 | Knowledge graph | ⚠️ Built |
+| 4 | Gap detection | ⚠️ Built |
+| 5 | Hypothesis generation | ⚠️ Built |
+| 6 | Experiment design | ⚠️ Built |
+| 7 | macOS app (SwiftUI) | 🔨 Core loop built |
+| 7b–9 | Web UI, auth, mobile | Not started |
 
-Pre-MVP. Backend only, no UI, no auth, single user. See [Phases.md](Phases.md) for the full
-sequence and [Memory.md](Memory.md) for current state, decisions, and known gaps.
+**What ⚠️ means, plainly:** every phase is built and tested, but no model has ever produced a
+real answer for this codebase — there's been no API key, and no local model has been run either.
+The deterministic halves (retrieval ranking, graph traversal, gap detection, the restatement and
+testability guards) are verified against real data. The model-dependent halves are tested against
+mocks only, so *quality* is unproven throughout.
+
+229 tests, single user, no auth. See [Phases.md](Phases.md) for the sequence and
+[Memory.md](Memory.md) for live state, decisions, and known gaps.
 
 ## Quickstart
 
@@ -31,6 +38,18 @@ cp .env.example .env      # then paste your key into ANTHROPIC_API_KEY
 docker compose up -d
 curl localhost:8000/health
 ```
+
+### Or run with no API key, on a local model
+
+```bash
+brew install ollama && ollama serve   # or: OLLAMA_HOST=0.0.0.0 ollama serve
+ollama pull qwen2.5:7b-instruct
+LLM_PROVIDER=ollama docker compose up -d api
+```
+
+`LLM_PROVIDER=ollama` swaps the Anthropic client for a local one at a single seam; every route
+behaves the same, including the 503 you get when Ollama isn't running. Override `OLLAMA_MODEL`
+to use a different pulled model.
 
 Ingest papers on a topic, then ask about them:
 
@@ -53,10 +72,15 @@ than an invented one.
 | `GET` | `/health` | Liveness, including a real database check |
 | `POST` | `/ingest` | `{topic, limit}` → pulls papers, chunks, embeds, persists. Idempotent. |
 | `POST` | `/ask` | `{question, k}` → cited answer |
+| `POST` | `/graph/build` | Extracts concepts and typed edges from ingested papers |
+| `POST` | `/graph/traverse` | `{concept, depth}` → the subgraph around a concept |
+| `POST` | `/gaps` | Ranked candidate gaps: missing links and cross-paper contradictions |
+| `POST` | `/hypotheses` | Gaps → specific, falsifiable hypotheses |
+| `POST` | `/experiments` | Hypotheses → structured experiment designs |
 
 `/ingest` is synchronous and reports what happened per source, including partial failures.
-`/ask` returns 503 rather than a plausible-looking non-answer if Claude is unreachable or the
-API key is missing.
+The model-backed routes return 503 rather than a plausible-looking non-answer when the
+configured provider is unreachable or unconfigured.
 
 ## How it works
 
@@ -66,10 +90,20 @@ chunked, embedded locally with [fastembed](https://github.com/qdrant/fastembed)
 (`all-MiniLM-L6-v2`, 384-dim, no API cost), and stored in Postgres with
 [pgvector](https://github.com/pgvector/pgvector).
 
-A question goes to an **orchestrator**, which delegates retrieval to a **retrieval worker**
-that embeds the question and pulls the nearest chunks by cosine distance. Question and
-passages then go to Claude for synthesis. Later phases add graph, gap-detection, hypothesis,
-and experiment-design workers under the same orchestrator — see [Architecture.md](Architecture.md).
+A question goes to an **orchestrator**, which delegates to one of five **worker agents** —
+retrieval, graph, gap-detection, hypothesis, experiment-design. Retrieval embeds the question
+and pulls the nearest chunks by cosine distance; those passages plus the question go to the
+model for synthesis. The knowledge graph lives in Postgres as `concepts` + `concept_edges`,
+traversed with a recursive CTE — Neo4j was planned and dropped once Phase 3 was scoped, since a
+second store bought nothing at this size. See [Architecture.md](Architecture.md).
+
+Gap detection looks for **open triads** — A links to B, B links to C, nobody linked A to C —
+and for **cross-paper contradictions**, where different papers assert different relations about
+the same concept pair. A deterministic prescore ranks candidates before any model call, so
+spend follows the request limit rather than the size of the graph.
+
+There's also a native **SwiftUI macOS client** in [`mac/`](mac) — one window, no dependencies,
+built with SwiftPM.
 
 **Citations are built server-side from the retrieved chunks, never parsed out of the model's
 prose.** The model may only cite by index; indices map back to real papers, and anything
@@ -97,3 +131,7 @@ without an API key.
   citation graph.
 - Titles and abstracts only, no full text.
 - No vector index yet (sequential scan); fine at this corpus size, revisit when it isn't.
+- **No model output has ever been reviewed.** Synthesis, concept extraction, contradiction
+  judging, gap assessment, hypothesis generation and experiment design are all plumbing-tested
+  against mocks. Whether any of them produce *good* output is genuinely unknown.
+- The Mac app has only ever rendered its "backend unavailable" state, for the same reason.

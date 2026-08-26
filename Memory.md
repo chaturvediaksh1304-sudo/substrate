@@ -6,9 +6,13 @@ changed — not at phase boundaries (`Rules.md:31`).
 > **Note:** this structure is a stand-in. Aksh has a template to supply; replace this layout
 > with it when it arrives, keeping the content.
 
-**Last updated:** 2026-08-25 — **Phase 7 (macOS app) core loop built.** `mac/` holds a native
-SwiftUI client: `SubstrateCore` (Foundation only, 6 tests) + `SubstrateMac` (views). Backend
-unchanged: 215 tests, eight routes.
+**Last updated:** 2026-08-26 — **local-model provider added.** `LLM_PROVIDER=ollama` swaps the
+Anthropic client for `app/agents/ollama.py` at the single `claude._client()` seam, so Substrate
+runs with no `ANTHROPIC_API_KEY`. Six call sites and five routes unchanged in behaviour. Backend:
+**229 tests pass, 1 skips**, eight routes.
+
+**Phase 7 (macOS app) core loop built.** `mac/` holds a native
+SwiftUI client: `SubstrateCore` (Foundation only, 6 tests) + `SubstrateMac` (views).
 
 **Phase 6 built: the backend arc is structurally complete.**
 Experiment design, `ExperimentWorker`, `POST /experiments`. 215 tests pass, 1 skips; eight
@@ -52,7 +56,9 @@ app/
                      POST /hypotheses, POST /experiments
                      — eight routes; the "split at three" decision below is overdue
   config.py          DATABASE_URL required (fails loud); EMBEDDING_DIM=384;
-                     ANTHROPIC_API_KEY optional at startup, required at use; ANTHROPIC_MODEL
+                                      ANTHROPIC_API_KEY optional at startup, required at use; ANTHROPIC_MODEL;
+                     LLM_PROVIDER (anthropic|ollama, Literal so bad values fail at boot);
+                     OLLAMA_BASE_URL; OLLAMA_MODEL
   db.py              engine, SessionLocal, Base
   models.py          Paper, Chunk — unique (source, external_id); Chunk.embedding Vector(384)
   ingestion/
@@ -63,8 +69,16 @@ app/
     pipeline.py      ingest_topic(session, topic, limit) -> IngestResult
   agents/
     __init__.py
-    claude.py        shared lazy Anthropic client + MissingAPIKeyError (moved out of
-                     synthesis.py when extraction became a second consumer)
+    claude.py        the single LLM seam: _client() returns an anthropic.Anthropic or an
+                     OllamaClient per LLM_PROVIDER, cached per provider in _CLIENTS.
+                     MissingAPIKeyError (moved out of synthesis.py when extraction became
+                     a second consumer; only the anthropic branch can raise it).
+                     unavailable(exc, consequence) -> the 503 detail routes use.
+    ollama.py        OllamaClient/_Messages/Message/TextBlock — duck-typed to the one method
+                     the six call sites use. POSTs {base}/api/chat, maps system= to a
+                     system-role message and max_tokens to options.num_predict, substitutes
+                     OLLAMA_MODEL for the caller's Anthropic model. Failures raise
+                     anthropic.APIError so existing excepts keep degrading to 503.
     retrieval.py     RetrievedChunk; RetrievalWorker.run(session, question, k=5)
                      cosine distance top-k, LOWER IS BETTER
     synthesis.py     synthesize(question, chunks) -> SynthesisResult; Citation.
@@ -108,7 +122,7 @@ tests/
   test_retrieval.py  test_synthesis.py  test_orchestrator.py  test_ask.py
   test_graph_extraction.py  test_graph_traversal.py  test_gaps.py  test_contradictions.py
   test_gap_ranking.py  test_gaps_route.py  test_hypothesis.py  test_hypothesis_route.py
-  test_experiment.py  test_experiment_route.py
+  test_experiment.py  test_experiment_route.py  test_ollama.py
 Dockerfile  docker-compose.yml  pyproject.toml  alembic.ini
 .env.example  .gitignore  .dockerignore
 ```
@@ -223,6 +237,12 @@ synchronous), `feedparser` (stdlib `xml.etree.ElementTree` parses arXiv's Atom).
 | 2026-08-10 | **No ivfflat/hnsw index** on `embedding` yet | Nothing to tune against. `ponytail:` note in `models.py` names the upgrade path. |
 | 2026-08-10 | Git initialized, local commits only | No remote, no push, per `Rules.md`. |
 | 2026-08-10 | **anthropic SDK** over raw httpx for Claude calls | Retries, typed errors, streaming, tool use — Phases 3–6 add five more agents that would each re-implement them. |
+| 2026-08-26 | **Ollama failures are raised as `anthropic.APIError`**, not a new shared error type | Six modules and five routes already `except anthropic.APIError` and turn it into a 503. Raw httpx errors would escape as unhandled 500s — losing the degradation discipline and breaking the Mac app's `unavailable` state. The alternative (a shared `LLMError` + fifteen widened excepts) is a bigger diff for the same behaviour. Cost: `anthropic` stays a dependency even with no key, and the type name is now a slight lie. Constructed in one place, `ollama._error`. |
+| 2026-08-26 | **`_client()` is the whole provider switch** — no registry, no ABC, no plugin loader | Every LLM call already funnels through it, and the existing tests monkeypatch `_client` per module. One `if` beats an abstraction with two implementations. |
+| 2026-08-26 | **`OLLAMA_MODEL` substituted inside the adapter**, not at the call sites | The call sites pass `settings.ANTHROPIC_MODEL` and are provider-agnostic by design (and tested that way). Only the adapter knows it's talking to Ollama, so only the adapter can name an Ollama model. The `model=` kwarg is accepted and discarded. |
+| 2026-08-26 | **`OLLAMA_BASE_URL` defaults to `localhost`, docker-compose overrides with `host.docker.internal`** | `localhost` is correct when the API runs on the host (uvicorn directly). Inside the api container `localhost` is the container, so compose supplies the value that works there. One default per context, both overridable by env. |
+| 2026-08-26 | Default local model **`qwen2.5:7b-instruct`** | ~4.7GB at Q4_K_M on an 18GB M3 Pro, 32k context, and the strongest JSON/instruction-following in the 7-8B class — which is what this codebase asks for: graph extraction, contradiction judging, gap assessment, hypothesis and experiment design all parse strict JSON. |
+| 2026-08-26 | Route 503 details now carry **the provider name and the upstream message** | The old strings hardcoded "Claude", which misnames the failure under Ollama and hides Ollama's own actionable message ("run `ollama pull …`"). `MissingAPIKeyError` details now come from the exception, so the wording is accurate for whichever provider raised it — and byte-identical to before on the anthropic path. |
 | 2026-08-10 | Default model `claude-sonnet-5`, one `settings.ANTHROPIC_MODEL` line | Good synthesis quality at sensible cost/latency. Swap without touching code. |
 | 2026-08-10 | **`ANTHROPIC_API_KEY` optional at startup, fatal at use** | `Rules.md` calls for hard-failing on missing keys at startup, but that would take down a working `/health` and `/ingest` over a key only `/ask` needs. Synthesis raises `MissingAPIKeyError`; `/ask` returns 503. Deliberate reading of the rule — revisit if you'd rather the app refuse to boot. |
 | 2026-08-10 | **Citations constructed server-side, never parsed from model prose** | An answer citing papers that don't exist is the "silently wrong output" `Rules.md` hard-fails on. The model cites by index; indices map back to real `RetrievedChunk`s; out-of-range indices are dropped and logged. |
@@ -287,6 +307,14 @@ synchronous), `feedparser` (stdlib `xml.etree.ElementTree` parses arXiv's Atom).
 - `sources.py` cannot distinguish "source timed out" from "source found nothing" — both are `[]`.
   `IngestResult.source_errors` only fills when a source raises past its own handling.
 - No test for `/health`'s degraded branch (needs the DB torn down mid-run).
+- **The Ollama path has never talked to a real Ollama.** Every test uses `httpx.MockTransport`;
+  Ollama is deliberately not installed on this machine. Request/response shape is checked
+  against Ollama's `docs/api.md`, but *answer quality* from a 7B local model is unproven, and
+  so is `num_ctx=8192` being enough for the 2000-token synthesis and graph prompts.
+- `ollama.py` pins `num_ctx` to one constant for every call site. If a prompt outgrows it,
+  Ollama truncates silently — the `ponytail:` note names the upgrade path (make it a setting).
+- Ollama binds `127.0.0.1` by default. If the api container can't reach it via
+  `host.docker.internal`, start it as `OLLAMA_HOST=0.0.0.0 ollama serve`.
 - Skipped papers get no chunk re-check — an already-present paper is assumed to have its chunks.
 - Starlette deprecation warning on every test run: `httpx` in `TestClient`, wants `httpx2`.
 - **Phase 2 criterion 5 is unverified**: no `ANTHROPIC_API_KEY` is set, so no live question has
@@ -364,6 +392,11 @@ curl -X POST localhost:8000/ingest -H 'Content-Type: application/json' \
   -d '{"topic":"<topic>","limit":5}'
 curl -X POST localhost:8000/ask -H 'Content-Type: application/json' \
   -d '{"question":"<question>","k":5}'
+
+# Run against a local model instead of the API (needs Ollama on the host):
+#   brew install ollama && ollama serve
+#   ollama pull qwen2.5:7b-instruct
+LLM_PROVIDER=ollama docker compose up -d api
 curl -X POST localhost:8000/graph/build -H 'Content-Type: application/json' \
   -d '{"limit":10}'
 curl -X POST localhost:8000/graph/traverse -H 'Content-Type: application/json' \

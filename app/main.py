@@ -10,6 +10,7 @@ from app.agents.gaps import RANK_LIMIT, CandidateGap
 from app.agents.graph import DEFAULT_DEPTH, MAX_DEPTH, GraphResult, Subgraph
 from app.agents.hypothesis import HYPOTHESIS_LIMIT
 from app.agents.orchestrator import Answer, Experiments, Hypotheses, Orchestrator
+from app.agents.claude import unavailable
 from app.agents.synthesis import MissingAPIKeyError
 from app.db import SessionLocal, engine
 from app.ingestion.pipeline import IngestResult, ingest_topic
@@ -59,10 +60,10 @@ def ask(request: AskRequest) -> Answer:
         except MissingAPIKeyError as exc:
             # A missing key is a hard failure (Rules.md): never a 200 with an empty answer.
             log.error("ask: %s", exc)
-            raise HTTPException(503, "ANTHROPIC_API_KEY is not configured; /ask is unavailable")
+            raise HTTPException(503, f"{exc}; /ask is unavailable")
         except anthropic.APIError as exc:
-            log.error("ask: Claude call failed: %s", exc)
-            raise HTTPException(503, "Claude is unavailable; the question was not answered")
+            log.error("ask: LLM call failed: %s", exc)
+            raise HTTPException(503, unavailable(exc, "the question was not answered"))
 
 
 class GraphBuildRequest(BaseModel):
@@ -79,12 +80,10 @@ def graph_build(request: GraphBuildRequest) -> GraphResult:
             return orchestrator.workers["graph"].run(session, papers)
         except MissingAPIKeyError as exc:
             log.error("graph build: %s", exc)
-            raise HTTPException(
-                503, "ANTHROPIC_API_KEY is not configured; /graph/build is unavailable"
-            )
+            raise HTTPException(503, f"{exc}; /graph/build is unavailable")
         except anthropic.APIError as exc:
-            log.error("graph build: Claude call failed: %s", exc)
-            raise HTTPException(503, "Claude is unavailable; the graph was not built")
+            log.error("graph build: LLM call failed: %s", exc)
+            raise HTTPException(503, unavailable(exc, "the graph was not built"))
 
 
 class TraverseRequest(BaseModel):
@@ -113,10 +112,10 @@ def find_gaps(request: GapsRequest) -> list[CandidateGap]:
             return orchestrator.find_gaps(session, request.limit)
         except MissingAPIKeyError as exc:
             log.error("gaps: %s", exc)
-            raise HTTPException(503, "ANTHROPIC_API_KEY is not configured; /gaps is unavailable")
+            raise HTTPException(503, f"{exc}; /gaps is unavailable")
         except anthropic.APIError as exc:
-            log.error("gaps: Claude call failed: %s", exc)
-            raise HTTPException(503, "Claude is unavailable; gaps were not detected")
+            log.error("gaps: LLM call failed: %s", exc)
+            raise HTTPException(503, unavailable(exc, "gaps were not detected"))
 
 
 class HypothesesRequest(BaseModel):
@@ -137,12 +136,10 @@ def hypothesize(request: HypothesesRequest) -> Hypotheses:
             return orchestrator.hypothesize(session, request.limit)
         except MissingAPIKeyError as exc:
             log.error("hypotheses: %s", exc)
-            raise HTTPException(
-                503, "ANTHROPIC_API_KEY is not configured; /hypotheses is unavailable"
-            )
+            raise HTTPException(503, f"{exc}; /hypotheses is unavailable")
         except anthropic.APIError as exc:
-            log.error("hypotheses: Claude call failed: %s", exc)
-            raise HTTPException(503, "Claude is unavailable; no hypotheses were generated")
+            log.error("hypotheses: LLM call failed: %s", exc)
+            raise HTTPException(503, unavailable(exc, "no hypotheses were generated"))
 
 
 class ExperimentsRequest(BaseModel):
@@ -163,9 +160,7 @@ def design_experiments(request: ExperimentsRequest) -> Experiments:
             return orchestrator.design_experiments(session, request.limit)
         except MissingAPIKeyError as exc:
             log.error("experiments: %s", exc)
-            raise HTTPException(
-                503, "ANTHROPIC_API_KEY is not configured; /experiments is unavailable"
-            )
+            raise HTTPException(503, f"{exc}; /experiments is unavailable")
         except anthropic.APIError as exc:
-            log.error("experiments: Claude call failed: %s", exc)
-            raise HTTPException(503, "Claude is unavailable; no experiments were designed")
+            log.error("experiments: LLM call failed: %s", exc)
+            raise HTTPException(503, unavailable(exc, "no experiments were designed"))
