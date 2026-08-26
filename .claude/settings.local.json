@@ -4,7 +4,18 @@
       "Bash(rtk ls *)",
       "Bash(git init *)",
       "Bash(rtk git *)",
-      "Bash(open -a Docker)"
+      "Bash(open -a Docker)",
+      "Bash(rtk curl *)",
+      "Bash(swift --version)",
+      "Bash(xcodebuild -version)",
+      "Bash(sw_vers)",
+      "Bash(rtk grep *)",
+      "Bash(python3 -c ' *)",
+      "Bash(printf 'let x = 1\\\\n')",
+      "Bash(swiftc -swift-version 6 -enable-upcoming-feature TotallyFakeFeatureXYZ -typecheck t.swift)",
+      "Bash(cat)",
+      "Bash(swiftc -swift-version 6 -enable-upcoming-feature NonisolatedNonsendingByDefault -enable-upcoming-feature InferIsolatedConformances -enable-upcoming-feature ApproachableConcurrency -typecheck f.swift)",
+      "Bash(mkdir -p \"/Users/akshchaturvedi/Library/Mobile Documents/com~apple~CloudDocs/Claude/Code/Substrate/mac/Sources/SubstrateCore\" \"/Users/akshchaturvedi/Library/Mobile Documents/com~apple~CloudDocs/Claude/Code/Substrate/mac/Tests/SubstrateCoreTests\" && echo made)"
     ]
   }
 }

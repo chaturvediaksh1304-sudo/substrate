@@ -52,14 +52,30 @@ Each phase is a loop: implement → verify against done-criteria → fix → re-
   - [ ] Output is reviewed against at least one real hypothesis from Phase 5 for usefulness
 - Depends on: Phase 5
 
-## Phase 7: Web UI
-- Goal: Frontend on top of the now-stable API, using Aksh's default stack (React/Next.js/TypeScript) unless reassessed at this point.
+## Phase 7: macOS app
+Reassessed at Phase 7, as this phase always allowed. A **native SwiftUI macOS app** replaces the
+web UI here; the web UI keeps its scope and moves to Phase 7b. iOS follows later — `SubstrateCore`
+is already platform-agnostic so that is a views-only job.
+
+- Goal: Native macOS client on top of the now-stable API.
+- Done-criteria:
+  - [x] App submits a question and displays the cited answer
+  - [x] Every state the API distinguishes is shown distinctly — answered, nothing found,
+        backend unavailable (503, server's own message), unreachable, unexpected
+  - [ ] Browse the knowledge graph / gaps / hypotheses / experiment proposals
+  - [ ] Verified against a live answer (**blocked**: needs `ANTHROPIC_API_KEY`)
+- Depends on: Phase 6
+
+## Phase 7b: Web UI
+- Goal: Frontend on top of the API, React/Next.js/TypeScript.
 - Done-criteria:
   - [ ] UI can submit a question and display the cited answer
-  - [ ] UI can browse the knowledge graph / gaps / hypotheses / experiment proposals from earlier phases
+  - [ ] UI can browse the knowledge graph / gaps / hypotheses / experiment proposals
   - [ ] Hosting decision (Docker self-hosted vs Vercel) finalized and deployed
-  - [ ] Pre-launch checklist (below) complete
-- Depends on: Phase 6
+  - [ ] Pre-launch checklist (below) complete — **web-only**; it covers robots.txt, meta
+        descriptions, sitemaps and social sharing, none of which apply to a Mac app, so it
+        travels with this phase rather than being dropped
+- Depends on: Phase 7
 
 ### Pre-launch checklist
 - [ ] Custom 404 page

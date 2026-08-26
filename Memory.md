@@ -6,7 +6,11 @@ changed — not at phase boundaries (`Rules.md:31`).
 > **Note:** this structure is a stand-in. Aksh has a template to supply; replace this layout
 > with it when it arrives, keeping the content.
 
-**Last updated:** 2026-08-25 — **Phase 6 built: the backend arc is structurally complete.**
+**Last updated:** 2026-08-25 — **Phase 7 (macOS app) core loop built.** `mac/` holds a native
+SwiftUI client: `SubstrateCore` (Foundation only, 6 tests) + `SubstrateMac` (views). Backend
+unchanged: 215 tests, eight routes.
+
+**Phase 6 built: the backend arc is structurally complete.**
 Experiment design, `ExperimentWorker`, `POST /experiments`. 215 tests pass, 1 skips; eight
 routes; five worker agents under the orchestrator. Every LLM-free half is verified live; every
 Claude path is plumbing-tested only, still awaiting `ANTHROPIC_API_KEY`.
@@ -28,7 +32,9 @@ the first real extraction run so seeded rows can't be mistaken for extracted one
 | 4 — Gap detection | ⚠️ All 4 parts built, three done-criteria met structurally — gap *quality* unproven (no API key) |
 | 5 — Hypothesis generation | ⚠️ Built, 2/3 criteria met structurally — criterion 3 ("reviewed for quality") is unmeetable without a key |
 | 6 — Experiment design | ⚠️ Built, criterion 1 met structurally — criterion 2 ("reviewed for usefulness") needs a key |
-| 7–9 | Not started. **A macOS app was raised on 2026-08-25** and is not in `Phases.md`; questions asked, deferred, undecided. UI standard chosen — see Design.md |
+| 7 — macOS app | 🔨 Core loop built and visually verified; browse-graph/gaps screens and a live answer still pending |
+| 7b — Web UI | Not started; keeps the web-only pre-launch checklist |
+| 8–9 | Not started. Phase 9 (mobile) reuses `SubstrateCore` unchanged — see Design.md for the UI standards |
 
 **Phase 4 is split into 4 parts**, ordered so the LLM-free part lands first:
 1. ✅ Structural gap detection — open triads, pure SQL, verifiable without a key
@@ -110,6 +116,32 @@ Dockerfile  docker-compose.yml  pyproject.toml  alembic.ini
 Docs: `README.md`, `PRD.md`, `Architecture.md`, `Rules.md`, `Phases.md`, `Design.md`, `Memory.md`.
 
 Repo: https://github.com/chaturvediaksh1304-sudo/substrate — public, `main`, pushed 2026-08-12.
+
+## macOS app — `mac/` (Phase 7)
+
+```
+mac/
+  Package.swift          swift-tools-version 6.3, platforms [.macOS(.v26)],
+                         .defaultIsolation(MainActor.self), dependencies: []
+  Sources/SubstrateCore/  Foundation ONLY — reused unchanged by a later iOS app
+    Models.swift          Answer, Citation, AskResult (5 cases)
+    SubstrateClient.swift ask(_:k:) async -> AskResult; never throws
+  Sources/SubstrateMac/
+    SubstrateApp.swift    @main, 1040x760 default, 960x640 min, hidden title bar
+    ChatView.swift        the one screen; transcript of question/response turns
+    DesignSystem/         Colors, Typography, Spacing — no hex literal in any view
+    Components/           Eyebrow, Card (the only things used more than once)
+  Tests/SubstrateCoreTests/ClientTests.swift   Swift Testing, URLProtocol stub, 6 tests
+  scripts/bundle.sh      swift build -c release -> Substrate.app
+```
+
+**Build/verify:** `cd mac && swift build && swift test`, then `./scripts/bundle.sh && open Substrate.app`.
+
+**`screencapture` is blocked** — this process has no Screen Recording permission, so the live
+window cannot be captured. Visual verification instead goes through a throwaway `ImageRenderer`
+harness built from copies of the real view files (`ScrollView`→`VStack`, `TextField`→`Text`, the
+two things ImageRenderer cannot lay out). Granting Terminal Screen Recording would remove the
+workaround.
 
 ## Skills available (installed globally, 2026-08-25)
 
@@ -211,6 +243,13 @@ synchronous), `feedparser` (stdlib `xml.etree.ElementTree` parses arXiv's Atom).
 | 2026-08-25 | **The client-stack decision now gates four adopted standards** | Six of agent-skills' eight skills are React-specific; the Vercel rules and Impeccable's detectors assume HTML/CSS. Under native SwiftUI only awesome-design-md and `writing-guidelines` survive. Recorded in Design.md as a table. Settle the stack before adopting more tooling. |
 | 2026-08-25 | **awesome-design-md adopted as the design-language source** — https://github.com/VoltAgent/awesome-design-md | Aksh's call. 73 ready-made `DESIGN.md` files reverse-engineered from real sites, in Google Stitch's spec (theme, palette + hex, type hierarchy, components, spacing, elevation, do/don't, responsive, agent prompts). Seeds our `DESIGN.md` rather than defining the brand — adopt one wholesale and Substrate looks like that company. **Most portable of the three standards**: color/type/spacing/elevation survive a native SwiftUI port; only the responsive and CSS-component sections are web-bound. |
 | 2026-08-25 | **`DESIGN.md` has three would-be writers** — this repo's `Design.md`, Impeccable's `init`, and a pasted awesome-design-md file | Same file on case-insensitive macOS. Intent doesn't conflict; overwrite risk does. Agreed order: seed from awesome-design-md, refine with Impeccable, keep the standards sections at the top. Back up before running `init`. |
+| 2026-08-25 | **Phase 7 is a native SwiftUI macOS app**; web UI becomes Phase 7b | Aksh's call. Xcode 26.6 / Swift 6.3.3 already present, zero new toolchain. `Phases.md` always allowed reassessing at Phase 7. The web-only pre-launch checklist travels with 7b rather than being dropped. |
+| 2026-08-25 | **SwiftPM + `bundle.sh`, no `.xcodeproj`** | An Xcode project would need XcodeGen/Tuist (new toolchain) or hand-written pbxproj (brittle). `swift build`/`swift test` work headlessly; ~40 lines assemble the `.app`. |
+| 2026-08-25 | **`SubstrateCore` split from `SubstrateMac`** | Core imports Foundation only, so the later iOS app is a views-only job. One extra target now. |
+| 2026-08-25 | **`AskResult` has 5 cases, not 4** | `unavailable` promises to carry *the server's own* `detail`; folding a 500 or an undecodable body into it would mean inventing a message the server never sent. `unexpected` gets its own case. |
+| 2026-08-25 | **No sidebar in v1** | `/ask` is the only route a chat UI can use — there is no endpoint listing papers. A `NavigationSplitView` with one item is ceremony; add it when a second screen exists. |
+| 2026-08-25 | **Visual language from 5 Minute Journal** (before.click reference) | Warm cream ground, gold accent used once per screen, serif headlines with selective italic. Its *marketing* claims — "#1 app", review counts, press logos — are deliberately not reproduced; those are another company's credentials. |
+| 2026-08-25 | Accent gold is **one element per screen** | Encoded as a comment in `Colors.swift`. Decorative accent is the main way this palette turns generic. |
 | 2026-08-25 | **Impeccable adopted as the design-taste toolkit** — https://github.com/pbakaus/impeccable | Aksh's call. Skill + 23 commands + 59 deterministic detectors, aimed at the default AI house style. Pairs with the Vercel guidelines: Vercel answers "is this correct", Impeccable answers "is this any good". **Not installed** — `/impeccable init` failed because the command doesn't exist here; installing writes harness config and hooks, so it needs approval and a reload. Also note `init` offers to write `DESIGN.md`, which on case-insensitive macOS **is** the existing `Design.md`. |
 | 2026-08-25 | **UI built against the Vercel Web Interface Guidelines** — https://raw.githubusercontent.com/vercel-labs/web-interface-guidelines/main/command.md | Aksh's call. Covers a11y, focus, forms, animation, typography, perf, URL state, i18n, copy, plus an anti-pattern list, and doubles as a review command to run against UI code. **Referenced, not vendored** — stable canonical URL, and a local copy would drift. Caveat: these are *web* guidelines and do not transfer directly to native SwiftUI; see Design.md. |
 | 2026-08-25 | Testability enforced by a guard running **opposite** to Phase 5's | Phase 5's failure mode is a hypothesis restating the gap, so `restates_gap` demands *new* terms. Phase 6's is a design not testing the hypothesis, so `measures_something_else` demands *overlapping* terms — separately on manipulated↔manipulation and measured↔measurement, so a design that varies the right thing but measures its latency is caught. Measured: on-target overlap floors at 3, off-target ceilings at 1; threshold 2 sits in the empty band. |

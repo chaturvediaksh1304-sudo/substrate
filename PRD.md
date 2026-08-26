@@ -28,7 +28,7 @@ Open tool for anyone doing research — not locked to academia or a single compa
 - Auth / multi-user accounts — planned for Phase 8, OAuth (Google/GitHub)
 - Mobile app — last in sequence (Phase 9), only after the web app is proven
 
-**Sequencing note:** nothing above is permanently cut — it's ordered. Backend/API first, then web UI, then mobile, in that order, once each prior layer is stable.
+**Sequencing note:** nothing above is permanently cut — it's ordered. Backend/API first, then a client, then mobile, once each prior layer is stable. **Amended 2026-08-25:** the first client is a native macOS app, not the web UI; the web UI moves to Phase 7b. Backend-first was honoured — Phases 1–6 landed before any client work began.
 
 ## Success looks like
 MVP is working when Substrate surfaces a gap or connection in the literature that Aksh didn't already know about, from a real research question he feeds it.

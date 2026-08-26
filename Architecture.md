@@ -1,10 +1,10 @@
 # Substrate — Architecture
 
 ## Platform
-API/backend-only for now. No UI in MVP. Web UI is planned for Phase 7, mobile app for Phase 9 — see PRD.md and Phases.md.
+Backend plus a **native macOS client** (Phase 7). The web UI moved to Phase 7b and the mobile app remains Phase 9 — see PRD.md and Phases.md.
 
 ## Stack
-- Frontend: none yet (Phase 7 will add React/Next.js/TypeScript per Aksh's default stack, decided at that time)
+- Frontend: **native SwiftUI macOS app** (`mac/`), decided at Phase 7. Two targets: `SubstrateCore` (Foundation only — models + API client, reused unchanged by a later iOS app) and `SubstrateMac` (views). SwiftPM plus a bundling script, no `.xcodeproj` and no package dependencies. A React/Next.js web UI keeps its place at Phase 7b.
 - Backend: Python + FastAPI
 - Database: PostgreSQL + pgvector (papers, metadata, and embeddings in one place, minimal ops overhead). **Neo4j was planned for Phase 3 and dropped once Phase 3 was scoped** — this doc invited that flag. The knowledge graph is a `concepts` + `concept_edges` pair of tables traversed with a recursive CTE: no second container, no second driver, no two stores to keep in sync, and Phase 4 gap detection becomes a join against the papers already stored. Revisit Neo4j if multi-hop traversal at real corpus size outgrows a recursive CTE — the graph worker is the only thing that touches graph storage.
 - Auth: none for MVP. OAuth (Google/GitHub) planned for Phase 8 once multi-user support is needed.
