@@ -132,7 +132,9 @@ mac/
     DesignSystem/         Colors, Typography, Spacing — no hex literal in any view
     Components/           Eyebrow, Card (the only things used more than once)
   Tests/SubstrateCoreTests/ClientTests.swift   Swift Testing, URLProtocol stub, 6 tests
-  scripts/bundle.sh      swift build -c release -> Substrate.app
+  Substrate-icon.png     1254x1254 source art; bundle.sh resamples it into a 10-size
+                         AppIcon.icns via sips + iconutil (both ship with macOS)
+  scripts/bundle.sh      swift build -c release -> Substrate.app, incl. the icon
 ```
 
 **Build/verify:** `cd mac && swift build && swift test`, then `./scripts/bundle.sh && open Substrate.app`.
