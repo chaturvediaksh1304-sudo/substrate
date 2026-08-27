@@ -47,13 +47,17 @@ def mixed_graph(session):
     return {"papers": (bridge_paper, pro, con), "concepts": (d, e, a, b, c)}
 
 
-def star(session, points):
-    """A hub every point links to and nothing else — every pair of points is an open triad."""
-    paper = add_paper(session, "1", "The Hub Paper")
-    hub = add_concept(session, "Hub")
-    for i in range(points):
-        point = add_concept(session, f"Point {i}")
-        link(session, point, "improves", hub, paper, f"Point {i} improves the hub.")
+def ring(session, points):
+    """A cycle of concepts: each neighbour pair of a concept is an open triad, so `points`
+    concepts give `points` candidates — and no concept is a hub, which a star would be.
+    `find_open_triads` bars a bridge above twice the graph's mean degree, and every concept
+    on a ring sits exactly on the mean.
+    """
+    paper = add_paper(session, "1", "The Ring Paper")
+    concepts = [add_concept(session, f"Point {i}") for i in range(points)]
+    for i, point in enumerate(concepts):
+        nxt = concepts[(i + 1) % points]
+        link(session, point, "improves", nxt, paper, f"Point {i} improves point {i + 1}.")
 
 
 # --- the deterministic half, no API key involved -------------------------------
@@ -93,10 +97,10 @@ def test_the_prescore_ranks_better_supported_candidates_first_without_any_model(
 
 def test_claude_is_called_at_most_limit_times_however_many_candidates_exist(db_session, monkeypatch):
     """The cost property: spend follows `limit`, not the size of the graph."""
-    star(db_session, points=6)
+    ring(db_session, points=6)
     messages = fake_client(monkeypatch, assessment())
 
-    assert len(gaps._candidates(db_session)) == 15
+    assert len(gaps._candidates(db_session)) == 6
 
     found = gaps.rank_gaps(db_session, limit=3)
 

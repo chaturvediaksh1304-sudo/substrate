@@ -416,6 +416,19 @@ synchronous), `feedparser` (stdlib `xml.etree.ElementTree` parses arXiv's Atom).
 
 ## Fixes worth remembering
 
+- **Hub concepts manufactured 93% of the cross-paper "gaps."** `find_open_triads` treated any
+  shared neighbour as a bridge, so `Retrieval-Augmented Generation` (degree 7) and
+  `large language models (llms)` (degree 4) — against a mean degree of 1.6 — produced 27 of the
+  29 triads at `min_papers=2`, 9 of the 10 candidates sent for assessment, and the model rated
+  `large language models <-> chat assistant systems` "a significant opportunity for research".
+  Fixed in the SQL, not in Python: `gaps.py` now joins a degree CTE and bars any bridge above
+  `HUB_DEGREE_FACTOR (2) x the graph's mean degree`. Relative, not a constant, so a bigger corpus
+  raises its own cap. After: 2 triads at `min_papers=2`, 0% hub-bridged, 0/10 hub-bridged in the
+  assessed top ten. The cap drops the *leg*, not the pair — a gap an ordinary concept also
+  bridges survives, and a hub can still be a gap's endpoint.
+  `tests/test_gap_ranking.py`'s `star` fixture was a literal hub, so it became `ring` (a cycle,
+  every degree 2) — same cost property, a graph the guard doesn't legitimately empty.
+
 - **arXiv 301-redirects `http://export.arxiv.org` to HTTPS.** httpx doesn't follow redirects by
   default and `raise_for_status()` doesn't flag a 301, so the empty body hit the XML parser and
   `fetch_arxiv` degraded to `[]` — silently, on every call. Fixed at the root in

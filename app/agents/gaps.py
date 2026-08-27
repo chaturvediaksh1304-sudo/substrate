@@ -20,6 +20,25 @@ log = logging.getLogger(__name__)
 # (skip concepts above N edges) before reaching for anything cleverer.
 DEFAULT_LIMIT = 50
 
+# A bridge that connects to everything tells you nothing. "A and C are both related to
+# large language models" is not evidence they belong together: a concept of degree N
+# manufactures N*(N-1)/2 triads that are facts about the graph's shape, not holes in the
+# literature. Measured on the 27-paper graph, two concepts of degree 7 and 6 against a mean
+# of 1.6 bridged 24 of the 29 cross-paper triads, and the assessment layer waved them
+# through. So a bridge only counts while its degree stays near what a concept here normally
+# has, and degree is distinct neighbours: two papers asserting the same edge is
+# corroboration, not reach.
+#
+# Relative to the graph, not a constant: mean degree is 2|E|/|V| and climbs as a corpus
+# grows, so a 500-paper graph raises its own cap instead of being silently filtered to
+# nothing. The factor is 2 because that is where the measurement put it — at 3 the cap lands
+# at 4.7 on the real graph, six concepts still qualify as bridges, and 8 of the 10 surviving
+# triads are still the same two hubs. At 2 the cap is 3.1 and none of them are.
+# ponytail: the mean is the crudest centre there is, and the hubs drag it upward a little.
+# If a corpus ever grows a long enough tail to matter, swap `avg` for `percentile_cont` —
+# same one scalar subquery, a median or a 95th percentile instead.
+HUB_DEGREE_FACTOR = 2
+
 
 @dataclass
 class StructuralGap:
@@ -49,6 +68,11 @@ def find_open_triads(
     to 1 — no filtering — because a gap's cross-paper-ness is a ranking input (part 3),
     not a precondition, and a stricter default would silently return nothing on a small graph.
 
+    Bridges above `HUB_DEGREE_FACTOR` times the graph's mean degree are dropped — a hub
+    tells you nothing about the pairs it sits between. It drops the leg, not the pair: a
+    gap a hub and an ordinary concept both bridge is still reported, bridged by the
+    ordinary one.
+
     An empty graph, or one with no open triads, is `[]` — a result, not an error.
     """
     # Both directions as one edge list, exactly as traversal does it: `A improves B`
@@ -71,6 +95,19 @@ def find_open_triads(
     leg, next_leg, closing = (undirected.alias(name) for name in ("leg", "next_leg", "closing"))
     bridge = aliased(Concept)
 
+    # One row per concept that has any edge, and one number for the whole graph to compare
+    # them against. Orphans are absent from both, which is right: they bridge nothing and
+    # would only drag the mean down.
+    degree = (
+        select(
+            undirected.c.src.label("id"),
+            func.count(distinct(undirected.c.dst)).label("degree"),
+        )
+        .group_by(undirected.c.src)
+        .cte("degree")
+    )
+    hub_cap = select(HUB_DEGREE_FACTOR * func.avg(degree.c.degree)).scalar_subquery()
+
     # Least/greatest is the whole dedup: the triad is found once as A->B->C and again as
     # C->B->A, and both collapse onto the same group.
     low = func.least(leg.c.src, next_leg.c.dst).label("low_id")
@@ -89,7 +126,11 @@ def find_open_triads(
         .select_from(leg)
         .join(next_leg, next_leg.c.src == leg.c.dst)
         .join(bridge, bridge.id == leg.c.dst)
+        .join(degree, degree.c.id == leg.c.dst)
         .where(
+            # A hub is not a bridge. Dropping it here rather than after the fact is what
+            # keeps it out of `bridge_count` and out of the top of the ranking.
+            degree.c.degree <= hub_cap,
             # A -> B -> A is a round trip, not a missing link.
             leg.c.src != next_leg.c.dst,
             # The link is only missing if it is missing in both directions — a C->A edge

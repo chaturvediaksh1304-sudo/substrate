@@ -143,3 +143,62 @@ def test_limit_is_honoured(db_session):
 
     assert len(gaps.find_open_triads(db_session)) == 2
     assert len(gaps.find_open_triads(db_session, limit=1)) == 1
+
+
+# --- a bridge that connects to everything tells you nothing ---------------------
+
+
+def star(session, points, paper=None, hub="Hub", point="Point"):
+    """One hub concept linked to `points` others and nothing else.
+
+    Every pair of points is an open triad, so the hub alone manufactures
+    `points * (points - 1) / 2` of them — the artifact the degree cap exists to drop.
+    """
+    paper = paper or add_paper(session, "1", "The Hub Paper")
+    centre = add_concept(session, hub)
+    for i in range(points):
+        link(session, add_concept(session, f"{point} {i}"), "improves", centre, paper)
+    return centre
+
+
+def test_a_hub_bridge_is_dropped_and_the_ordinary_gap_survives(db_session):
+    """Six points is fifteen hub-bridged pairs against one real one. Only the real one lands."""
+    paper = add_paper(db_session, "1", "Paper One")
+    star(db_session, points=6, paper=paper)
+    x, b, y = (add_concept(db_session, n) for n in ("X", "B", "Y"))
+    link(db_session, x, "improves", b, paper, "X improves B.")
+    link(db_session, b, "improves", y, paper, "B improves Y.")
+
+    assert pairs(gaps.find_open_triads(db_session)) == [("X", "Y")]
+
+
+def test_a_hub_is_dropped_from_a_gap_a_real_bridge_also_supports(db_session):
+    """The cap drops the leg, not the pair: X-Hub-Y and X-B-Y is still a gap, bridged by B."""
+    paper = add_paper(db_session, "1", "Paper One")
+    hub = star(db_session, points=4, paper=paper)
+    x, b, y = (add_concept(db_session, n) for n in ("X", "B", "Y"))
+    for near in (x, y):
+        link(db_session, near, "improves", hub, paper, "Near improves the hub.")
+        link(db_session, near, "improves", b, paper, "Near improves B.")
+
+    found = gaps.find_open_triads(db_session)
+
+    # The hub is barred from bridging, not from being an endpoint: (Hub, B) is a real gap,
+    # bridged by X and Y, and it stays.
+    gap = next(g for g in found if (g.concept_a, g.concept_b) == ("X", "Y"))
+    assert (gap.bridges, gap.bridge_count) == (["B"], 1)
+    assert all("Hub" not in g.bridges for g in found)
+
+
+def test_a_bridge_at_the_degree_cap_still_bridges(db_session):
+    """Three points: mean degree 1.5, so the cap is 3.0 and the hub sits exactly on it."""
+    star(db_session, points=3)
+
+    assert len(gaps.find_open_triads(db_session)) == 3
+
+
+def test_a_bridge_one_edge_past_the_degree_cap_bridges_nothing(db_session):
+    """Four points: mean degree 1.6, so the cap is 3.2 and a degree of 4 is over it."""
+    star(db_session, points=4)
+
+    assert gaps.find_open_triads(db_session) == []
