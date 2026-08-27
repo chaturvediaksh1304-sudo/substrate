@@ -145,12 +145,16 @@ without an API key.
 - Titles and abstracts only, no full text.
 - No vector index yet (sequential scan); fine at this corpus size, revisit when it isn't.
 - **Gap *significance* judgement is unreliable.** Two model sizes, 7B and 14B, both rated every
-  surviving gap 2 on a 1–3 scale. Doubling the model bought exactly one extra rejection. The
-  fix is deterministic, not a bigger model: filter gap endpoints by embedding distance so
-  generic bridges like `dataset` die before a model is asked.
-- **`RAG` and `Retrieval-Augmented Generation` are still two concepts.** `normalize()` collapses
-  case, plurals, hyphens and parenthetical glosses, but cannot know an acronym equals its
-  expansion. That needs entity resolution over the embeddings already in the project.
+  surviving gap 2 on a 1–3 scale. Doubling the model bought exactly one extra rejection. A
+  deterministic pre-filter is the likelier fix than a bigger model, but the obvious one —
+  embedding distance between gap endpoints — is now suspect: see below.
+- **Embeddings do not separate concepts at this granularity.** Measured over all 5,356 pairs in
+  the live graph, `RAG` sits 0.885 from `retrieval augmented generation` while
+  `hallucination`/`misinformation` sit at 0.861 and `corpus poisoning`/`adversarial attack` at
+  0.874. Same-concept and different-concept pairs occupy the same range, so no threshold exists.
+  MiniLM is a subword model and an acronym shares no subwords with its expansion — it places
+  `RAG` closest to `cloth rag`, at 0.144. Acronym identity is handled structurally instead, by
+  initials matching: 1 hit in 5,356 pairs, and it was the right one.
 - Only 27 of 55 ingested papers are in the graph — `/graph/build` has no cursor, so it can only
   ever process papers 1..N.
 - Claude has never been tested on any of this; there has been no API key. The ceiling of a

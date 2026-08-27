@@ -375,3 +375,70 @@ def test_distinct_concepts_do_not_collide():
     assert graph.normalize("retrieval") != graph.normalize("retriever")
     assert graph.normalize("graph") != graph.normalize("grapheme")
     assert graph.normalize("RAG") != graph.normalize("retrieval augmented generation")  # known limit
+
+
+# --- acronym resolution: the one identity case normalize() cannot reach --------------------
+
+
+@pytest.mark.parametrize(
+    "short, long",
+    [
+        ("rag", "retrieval augmented generation"),
+        ("llm", "large language model"),
+        ("cot", "chain of thought"),
+    ],
+)
+def test_an_acronym_is_the_same_concept_as_its_expansion(short, long):
+    assert graph.is_acronym_of(short, long)
+    assert graph.is_acronym_of(long, short) is False  # one-directional by design
+
+
+@pytest.mark.parametrize(
+    "a, b",
+    [
+        ("rag", "ragpart"),          # shares a prefix, not an expansion
+        ("retrieval", "retriever"),  # the pair embeddings wrongly merge
+        ("rag", "cloth rag"),        # 'rag' is not the initials of 'cloth rag'
+        ("rag", "retrieval augmented"),   # wrong number of words
+        ("r", "retrieval augmented generation"),  # too short to be an acronym
+        ("rag2", "retrieval augmented generation"),  # not alphabetic
+    ],
+)
+def test_near_misses_are_not_acronyms(a, b):
+    """A false merge invents a claim the papers never made — err toward leaving things alone."""
+    assert not graph.is_acronym_of(a, b)
+    assert not graph.is_acronym_of(b, a)
+
+
+def test_an_acronym_and_its_expansion_land_on_one_concept(db_session):
+    first, created_first = graph._concept_id(
+        db_session, "retrieval augmented generation", "Retrieval-Augmented Generation"
+    )
+    second, created_second = graph._concept_id(db_session, "rag", "RAG")
+    assert created_first is True
+    assert created_second is False, "the acronym should have resolved to the existing expansion"
+    assert first == second
+    assert db_session.execute(select(func.count(Concept.id))).scalar() == 1
+
+
+def test_the_expansion_resolves_to_an_existing_acronym_too(db_session):
+    first, _ = graph._concept_id(db_session, "rag", "RAG")
+    second, created = graph._concept_id(
+        db_session, "retrieval augmented generation", "Retrieval-Augmented Generation"
+    )
+    assert created is False
+    assert first == second
+
+
+def test_a_distinct_concept_still_gets_its_own_row(db_session):
+    graph._concept_id(db_session, "retrieval augmented generation", "RAG")
+    _, created = graph._concept_id(db_session, "retriever", "retriever")
+    assert created is True
+    assert db_session.execute(select(func.count(Concept.id))).scalar() == 2
+
+
+def test_exact_normalized_match_still_short_circuits(db_session):
+    first, created_first = graph._concept_id(db_session, "self attention", "Self-Attention")
+    second, created_second = graph._concept_id(db_session, "self attention", "self attention")
+    assert created_first is True and created_second is False
+    assert first == second

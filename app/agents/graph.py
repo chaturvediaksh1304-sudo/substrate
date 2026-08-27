@@ -94,6 +94,36 @@ def normalize(name: str) -> str:
     return " ".join(_singular(w.lower()) for w in words)
 
 
+# An acronym is 2-6 letters in practice: RAG, LLM, CoT, BERT, MAP. Shorter is a variable
+# name, longer stops being an acronym.
+ACRONYM_LENGTHS = range(2, 7)
+
+
+def is_acronym_of(short: str, long: str) -> bool:
+    """True when `short` is the initials of `long`, both already normalized.
+
+    This is the one identity relation `normalize()` cannot reach. It is not a string-similarity
+    problem and it is not an embedding problem either — measured on the live graph,
+    `RAG` sits 0.885 from `retrieval augmented generation` and 0.144 from `cloth rag`, because
+    a subword model shares no subwords between an acronym and its expansion. The signal is
+    structural, so the rule is structural.
+
+    One-directional on purpose: `is_acronym_of(long, short)` is False. Callers try both orders
+    explicitly, which keeps the asymmetry visible rather than hidden inside the predicate.
+
+    ponytail: initials only, so an ambiguous acronym resolves to whichever expansion reached the
+    graph first — MAP is both "mean average precision" and "message authentication protocol".
+    That needs the bare acronym and both expansions in one corpus to bite; revisit if it does.
+    """
+    short_tokens, long_tokens = short.split(), long.split()
+    if len(short_tokens) != 1 or len(long_tokens) < 2:
+        return False
+    candidate = short_tokens[0]
+    if len(candidate) not in ACRONYM_LENGTHS or not candidate.isalpha():
+        return False
+    return candidate == "".join(token[0] for token in long_tokens)
+
+
 @dataclass
 class RelatedConcept:
     id: int
@@ -320,8 +350,37 @@ def _validate(raw: str) -> tuple[dict[str, str], list[dict[str, str]]]:
     return concepts, edges
 
 
+def _acronym_row(session: Session, normalized: str) -> int | None:
+    """An existing row that is this concept under its other name — acronym or expansion.
+
+    Only rows that could plausibly match are fetched: a single-word concept can only expand to
+    a multi-word one, and vice versa. That keeps this a small scan rather than a self-join over
+    the whole table.
+    """
+    single_word = " " not in normalized
+    if single_word and (len(normalized) not in ACRONYM_LENGTHS or not normalized.isalpha()):
+        return None
+    shape = Concept.normalized.like("% %") if single_word else Concept.normalized.notlike("% %")
+    for row_id, other in session.execute(select(Concept.id, Concept.normalized).where(shape)):
+        if is_acronym_of(normalized, other) or is_acronym_of(other, normalized):
+            return row_id
+    return None
+
+
 def _concept_id(session: Session, normalized: str, name: str) -> tuple[int, bool]:
-    """Insert-or-fetch by normalized form: the same concept from two papers is one row."""
+    """Insert-or-fetch: the same concept from two papers is one row, including when the two
+    papers spell it differently.
+
+    Exact match first, so the common path stays one query. Only a genuinely new normalized form
+    pays for the acronym lookup. The surviving row keeps its first-seen `name`, so a graph that
+    met `RAG` first displays `RAG` — the identity is right either way, and rewriting the display
+    name would be a mutation for cosmetics.
+    """
+    existing = session.execute(select(Concept.id).where(Concept.normalized == normalized)).scalar()
+    if existing is not None:
+        return existing, False
+    if (resolved := _acronym_row(session, normalized)) is not None:
+        return resolved, False
     concept_id = session.execute(
         insert(Concept)
         .values(name=name, normalized=normalized)
@@ -330,6 +389,7 @@ def _concept_id(session: Session, normalized: str, name: str) -> tuple[int, bool
     ).scalar()
     if concept_id is not None:
         return concept_id, True
+    # Lost an insert race; the winner's row is the answer.
     existing = session.execute(select(Concept.id).where(Concept.normalized == normalized)).scalar_one()
     return existing, False
 

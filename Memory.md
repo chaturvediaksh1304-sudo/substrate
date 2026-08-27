@@ -377,6 +377,22 @@ synchronous), `feedparser` (stdlib `xml.etree.ElementTree` parses arXiv's Atom).
 - **The remaining acronym limit is visible in the data**: `RAG` (2 papers) and
   `Retrieval-Augmented Generation` (5 papers) are still two nodes. Merged they would be the
   single biggest hub. Needs embedding-based entity resolution.
+- **Embedding-based entity resolution measured and rejected, 2026-08-26.** All 5,356 concept
+  pairs on the live graph, real fastembed: `RAG` ↔ `retrieval augmented generation` = **0.885**
+  (51st percentile — the distance between two *random* concepts), against
+  `hallucination`/`misinformation` 0.861 and `corpus poisoning`/`adversarial attack` 0.874.
+  Same-concept spans [0.038, 0.885]; different-concept spans [0.051, 0.874] — **identical
+  range, no threshold exists.** Cause is structural: MiniLM is a subword model, an acronym
+  shares no subwords with its expansion, and it places `RAG` nearest `cloth rag` (0.144).
+  Templating and evidence-concatenation rescues both failed — the second worse, collapsing
+  `generation`↔`retrieval` to 0.025 by turning concept embeddings into paper embeddings.
+  **Do not retry this approach.** No migration, no `Vector(384)` column on `concepts`.
+- **Acronym identity solved structurally instead.** `is_acronym_of()` + `_acronym_row()` in
+  `graph.py`: initials matching, one-directional, checked in `_concept_id` only after the exact
+  match misses so the common path stays one query. On the live graph it fires on exactly 1 of
+  5,356 pairs — `rag` == `retrieval augmented generation` — and declines `rag`/`ragpart`,
+  `retrieval`/`retriever`, `rag`/`cloth rag`. Ceiling: an ambiguous acronym resolves to
+  whichever expansion arrived first.
 - **Hub penalty landed 2026-08-26.** `find_open_triads` drops bridges whose degree exceeds
   2× the graph mean, in SQL. Live: cross-paper triads 29 → 2, hub-bridged 82% → **0%**,
   top-10-for-assessment 9/10 hub-bridged → 0/10. Threshold is relative, not absolute, because
