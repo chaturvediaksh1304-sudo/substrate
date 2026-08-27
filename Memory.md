@@ -377,6 +377,26 @@ synchronous), `feedparser` (stdlib `xml.etree.ElementTree` parses arXiv's Atom).
 - **The remaining acronym limit is visible in the data**: `RAG` (2 papers) and
   `Retrieval-Augmented Generation` (5 papers) are still two nodes. Merged they would be the
   single biggest hub. Needs embedding-based entity resolution.
+- **Hub penalty landed 2026-08-26.** `find_open_triads` drops bridges whose degree exceeds
+  2× the graph mean, in SQL. Live: cross-paper triads 29 → 2, hub-bridged 82% → **0%**,
+  top-10-for-assessment 9/10 hub-bridged → 0/10. Threshold is relative, not absolute, because
+  edges grow linearly with papers while concepts grow sublinearly.
+- **Controlled model experiment, 2026-08-26 — same graph, same prompts, same code, only the
+  model swapped (`qwen2.5:7b-instruct` → `qwen2.5:14b-instruct`):**
+  7B passed 3 of 4 candidates; 14B passed 2 of 4. The 14B rejected exactly one extra — the
+  weakest, `RAG ↔ metrics`. Both passed the gaps bridged by generic words (`dataset`,
+  `cognitive abilities`).
+  **Doubling the model bought one rejection.** This is a design problem, not primarily a
+  model-size problem.
+- **The significance scale is dead.** Across both runs, every surviving gap was rated **2** on
+  a 1–3 scale — the value 1 and the value 3 were never used once. So the assessor contributes
+  no *ordering* information at all; it is a weak binary filter wearing a rating scale. The
+  prescore is doing all the real ranking.
+- **Next fix for judgement is deterministic, not a bigger model**: filter endpoint pairs by
+  embedding distance using the fastembed model already in the project. A bridge like `dataset`
+  or `metrics` connects endpoints that are semantically unrelated; a real gap connects two
+  things close enough to plausibly belong together. That kills the generic-bridge case before
+  a model is asked, the same way the hub penalty kills the topology case.
 - **⚠️ The real problem now is hub artifacts, not fabrication.** Two concepts —
   `Retrieval-Augmented Generation` (degree 9) and `large language models (llms)` (degree 6) —
   bridge **82% of all 29 open triads**. A hub connected to N concepts manufactures ~N² "gaps"
