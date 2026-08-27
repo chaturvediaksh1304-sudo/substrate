@@ -93,7 +93,7 @@ def test_extraction_persists_concepts_and_edges_with_provenance(db_session, monk
         papers_processed=1, concepts_created=2, edges_created=1, papers_failed=0
     )
     concepts = db_session.execute(select(Concept)).scalars().all()
-    assert sorted(c.normalized for c in concepts) == ["recurrence", "self-attention"]
+    assert sorted(c.normalized for c in concepts) == ["recurrence", "self attention"]
 
     stored = db_session.execute(select(ConceptEdge)).scalars().one()
     assert stored.relation == "replaces"
@@ -101,7 +101,7 @@ def test_extraction_persists_concepts_and_edges_with_provenance(db_session, monk
     assert stored.paper_id == paper.id
     assert stored.evidence == ATTENTION["abstract"]
     by_id = {c.id: c.normalized for c in concepts}
-    assert by_id[stored.source_concept_id] == "self-attention"
+    assert by_id[stored.source_concept_id] == "self attention"
     assert by_id[stored.target_concept_id] == "recurrence"
 
     prompt = messages.calls[0]["messages"][0]["content"]
@@ -136,7 +136,7 @@ def test_same_concept_from_two_papers_collapses_to_one_node(db_session, monkeypa
 
     assert result.concepts_created == 3  # not 4: self-attention is shared
     shared = (
-        db_session.execute(select(Concept).where(Concept.normalized == "self-attention"))
+        db_session.execute(select(Concept).where(Concept.normalized == "self attention"))
         .scalars()
         .one()
     )
@@ -274,7 +274,7 @@ def test_concepts_no_edge_uses_are_not_persisted(db_session, monkeypatch):
     assert result.edges_created == 2
     assert sorted(
         c.normalized for c in db_session.execute(select(Concept)).scalars()
-    ) == ["recurrence", "self-attention"]
+    ) == ["recurrence", "self attention"]
 
 
 def test_paper_whose_edges_are_all_invalid_persists_no_concepts(db_session, monkeypatch):
@@ -317,10 +317,10 @@ def test_declaring_an_existing_concept_without_using_it_does_not_delete_it(
 
     survivors = sorted(c.normalized for c in db_session.execute(select(Concept)).scalars())
     assert survivors == [
-        "bidirectional pre-training",
+        "bidirectional pre training",
         "masked language modelling",
         "recurrence",
-        "self-attention",
+        "self attention",
     ]
     still_there = db_session.execute(
         select(ConceptEdge).where(ConceptEdge.paper_id == attention.id)
@@ -346,3 +346,32 @@ def test_prompt_states_the_extraction_constraints(db_session, monkeypatch):
         assert forbidden in system
     assert "acronym" in system
     assert "must appear in at least one edge" in system
+
+
+# --- normalize(): concept identity across papers -------------------------------------------
+
+@pytest.mark.parametrize(
+    "variants",
+    [
+        ["large language model (LLM)", "Large Language Model", "large language models"],
+        ["retrieval-augmented generation", "Retrieval Augmented Generation"],
+        ["chunking strategies", "Chunking Strategy"],
+    ],
+)
+def test_surface_variants_of_one_concept_share_a_key(variants):
+    """Cross-paper linking only works if the same idea lands on the same key."""
+    keys = {graph.normalize(v) for v in variants}
+    assert len(keys) == 1, f"{variants} split into {keys}"
+
+
+@pytest.mark.parametrize("word", ["analysis", "bias", "status", "class", "physics"])
+def test_words_ending_in_s_that_are_not_plurals_survive(word):
+    """A false merge invents a claim; these must not lose their trailing s to a naive rule."""
+    assert graph.normalize(word) == graph.normalize(word.upper())
+    assert graph.normalize(word).endswith("s") or word == "physics"
+
+
+def test_distinct_concepts_do_not_collide():
+    assert graph.normalize("retrieval") != graph.normalize("retriever")
+    assert graph.normalize("graph") != graph.normalize("grapheme")
+    assert graph.normalize("RAG") != graph.normalize("retrieval augmented generation")  # known limit

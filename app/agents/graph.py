@@ -1,4 +1,5 @@
 import json
+import re
 import logging
 from dataclasses import dataclass
 from typing import Any, Sequence
@@ -57,9 +58,40 @@ class GraphResult:
     papers_failed: int = 0  # API error, unparseable JSON or invalid shape on that one paper
 
 
+# Endings where a trailing "s" is part of the word, not a plural: analysis, bias, status, class.
+_KEEPS_S = ("ss", "us", "is", "as")
+
+
+def _singular(word: str) -> str:
+    """Crude, deliberately one-directional. A miss leaves two nodes; a false merge invents a
+    claim, so every rule here errs toward leaving things alone."""
+    if len(word) > 4 and word.endswith("ies"):
+        return word[:-3] + "y"
+    if len(word) > 3 and word.endswith("s") and not word.endswith(_KEEPS_S):
+        return word[:-1]
+    return word
+
+
 def normalize(name: str) -> str:
-    """Concept identity. Casing and whitespace are surface noise, not different nodes."""
-    return " ".join(name.split()).lower()
+    """Concept identity. Casing, whitespace, a parenthetical gloss and a plural "s" are all
+    surface noise — the same idea wearing different clothes, not different nodes.
+
+    Stripping the gloss is what collapses "large language model (LLM)", "Large Language Model"
+    and "large language models" into one node, which is the whole point: cross-paper linking
+    only works if the same concept lands on the same key.
+
+    ponytail: this cannot merge a bare acronym with its expansion — "RAG" and "retrieval-
+    augmented generation" still key differently, because nothing here knows they are the same
+    thing. That needs real entity resolution: embed the concept names with the fastembed model
+    already in this project and merge near-identical pairs.
+    """
+    without_gloss = re.sub(r"\s*\([^)]*\)", "", name)
+    # A hyphen between words is a typographic choice, not a distinction: "retrieval-augmented"
+    # and "retrieval augmented" are one concept.
+    words = (without_gloss or name).replace("-", " ").split()
+    # Lowercase before singularising: the plural rules match lowercase endings, so "MODELS"
+    # would otherwise keep its "s" and key differently from "models".
+    return " ".join(_singular(w.lower()) for w in words)
 
 
 @dataclass
