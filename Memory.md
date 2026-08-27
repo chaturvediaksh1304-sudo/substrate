@@ -370,15 +370,28 @@ synchronous), `feedparser` (stdlib `xml.etree.ElementTree` parses arXiv's Atom).
   Before the fixes — 3 papers → 44 concepts / 7 edges, **75% orphans**, 0 cross-paper links.
   After `MAX_CONCEPTS=8` + the orphan guard — 2 fresh papers → 13 concepts / 16 edges,
   **0 orphans**, edges now outnumber concepts.
-- **Cross-paper linking is still 0 and is the real blocker for Phases 3–6.** The same concept
-  surfaces as `RAG`, `retrieval-augmented generation (RAG)`, `Large Language Model`,
-  `large language model (LLM)`, `large language models` — variants that normalize differently,
-  so they become separate nodes. The only multi-paper concept in the graph is `protein folding`,
-  which is a hand-seeded fixture, not extracted. **Root cause: extraction is per-paper and
-  stateless**, so no canonical vocabulary can emerge. Three fixes, cheapest first: harden
-  `normalize()` (strip parentheticals, singularize); resolve entities post-hoc using the
-  fastembed embeddings already in the project; or show the model the existing concept
-  vocabulary during extraction so it reuses terms.
+- **Graph rebuilt 2026-08-26 after the `normalize()` fix** (wipe approved, papers untouched):
+  27 papers → **104 concepts, 89 edges, 0 orphans, 3 papers failed**. Cross-paper linking went
+  from **0 → 5 concepts spanning multiple papers**, two of them spanning 5 papers each. The
+  earlier 44-concept/7-edge/75%-orphan shape is gone.
+- **The remaining acronym limit is visible in the data**: `RAG` (2 papers) and
+  `Retrieval-Augmented Generation` (5 papers) are still two nodes. Merged they would be the
+  single biggest hub. Needs embedding-based entity resolution.
+- **⚠️ The real problem now is hub artifacts, not fabrication.** Two concepts —
+  `Retrieval-Augmented Generation` (degree 9) and `large language models (llms)` (degree 6) —
+  bridge **82% of all 29 open triads**. A hub connected to N concepts manufactures ~N² "gaps"
+  that are topology, not literature. Live output included
+  `large language models <-> chat assistant systems`, which the assessor called "a significant
+  opportunity for research" — one of the most explored connections in the field.
+- **The LLM assessment layer did not catch it.** It rejected 2 of 5 candidates but passed the
+  hub artifacts with confident rationales. So Substrate currently produces *plausible, well-cited,
+  wrong* gaps: every paper is real, every edge is real, the judgement is not. This is the
+  failure mode `Rules.md` names — and it arrives through judgement, not through fabrication,
+  which is the one place none of the existing guards look.
+- **Highest-leverage fix: penalise hub bridges deterministically.** Down-weight or exclude
+  concepts above a degree threshold when forming triads, the way the prescore already works —
+  a constraint rather than a prompt. Second: use the fastembed embeddings already present to
+  drop endpoint pairs that are too semantically distant to be a real gap.
 - **`POST /graph/build` can only ever process papers 1..N** — it does `ORDER BY id LIMIT n`, so
   there is no way to extract paper 4 without re-processing 1–3, and no way to resume. With 55
   papers this needs a cursor or an "unprocessed only" filter.
