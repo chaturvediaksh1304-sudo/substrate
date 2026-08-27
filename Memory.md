@@ -387,6 +387,22 @@ synchronous), `feedparser` (stdlib `xml.etree.ElementTree` parses arXiv's Atom).
   Templating and evidence-concatenation rescues both failed — the second worse, collapsing
   `generation`↔`retrieval` to 0.025 by turning concept embeddings into paper embeddings.
   **Do not retry this approach.** No migration, no `Vector(384)` column on `concepts`.
+- **Graph re-extracted 2026-08-26 with acronym resolution live** (wipe approved), on
+  `qwen2.5:14b-instruct`: **30 papers, 0 failed, 158 concepts, 143 edges, 0 orphans**
+  (previous run: 27 papers, 3 failed, 104 concepts, 89 edges). No separate `rag`, `llm` or
+  `cot` row exists — the merge held. `retrieval-augmented generation` now spans **13 papers**,
+  up from 5, and `large language models` 8, up from 5.
+- **⚠️ But cross-paper triads fell to 1**, and this is the method's real constraint, not a bug.
+  Merging the acronym made `retrieval-augmented generation` a degree-14 hub in a 158-concept
+  graph whose mean degree is ~1.8, so the hub penalty (2× mean ≈ 3.6) now correctly excludes it
+  — along with every other concept of degree ≥4. **On a corpus that is ~50 RAG papers out of 55,
+  "RAG" is a hub by construction, and open-triad discovery has almost nothing left to bridge.**
+  Gap detection needs a *diverse* corpus; a single-topic one collapses into one hub plus leaves.
+- **The one surviving gap is the best this project has produced**:
+  `discrete molecular dynamics` ↔ `pruned-enriched Rosenbluth method`, bridged by
+  `model protein`, from papers 11 and 13 — two different computational methods for simulating
+  protein folding, both applied to model proteins, never directly compared. It came from the
+  5-paper protein sub-corpus, not the 50-paper RAG one, which is exactly the point above.
 - **Acronym identity solved structurally instead.** `is_acronym_of()` + `_acronym_row()` in
   `graph.py`: initials matching, one-directional, checked in `_concept_id` only after the exact
   match misses so the common path stays one query. On the live graph it fires on exactly 1 of
