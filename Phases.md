@@ -45,14 +45,23 @@ Each phase is a loop: implement → verify against done-criteria → fix → re-
 - Done-criteria:
   - [ ] Hypothesis agent takes a gap + supporting graph/paper context and produces a hypothesis
   - [ ] Hypothesis is specific and falsifiable, not a vague restatement of the gap
-  - [ ] Test covers at least one real gap → hypothesis case reviewed for quality
+  - [x] Test covers at least one real gap → hypothesis case reviewed for quality
+        **Met 2026-08-26.** Real gap (EVOR ↔ aligned visual captions) → "EVOR, adapted to use
+        aligned visual captions in its knowledge base, will show improved execution accuracy on
+        code generation tasks involving visual elements." Specific, falsifiable, grounded in two
+        real papers. A second hypothesis from the same run was weaker — a comparison rather than
+        a mechanism.
 - Depends on: Phase 4
 
 ## Phase 6: Experiment Design
 - Goal: Turn a hypothesis into a structured experiment proposal — implemented as an experiment-design worker agent under the orchestrator.
 - Done-criteria:
   - [ ] Experiment-design agent, given a hypothesis, outputs a structured experiment design (method, variables, expected outcome)
-  - [ ] Output is reviewed against at least one real hypothesis from Phase 5 for usefulness
+  - [x] Output is reviewed against at least one real hypothesis from Phase 5 for usefulness
+        **Met 2026-08-26.** A real ablation: two EVOR variants, with and without aligned visual
+        captions, over EVOR-BENCH, measuring execution accuracy — naming a benchmark that comes
+        from the source paper itself. Controls listed, expected and discriminating outcomes both
+        concrete. A researcher could run it.
 - Depends on: Phase 5
 
 ## Phase 7: macOS app

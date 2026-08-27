@@ -12,21 +12,34 @@ structured experiment designs.
 | Phase | | |
 |---|---|---|
 | 1 | Foundation & ingestion | ✅ Verified |
-| 2 | RAG Q&A | ⚠️ Built |
-| 3 | Knowledge graph | ⚠️ Built |
-| 4 | Gap detection | ⚠️ Built |
-| 5 | Hypothesis generation | ⚠️ Built |
-| 6 | Experiment design | ⚠️ Built |
+| 2 | RAG Q&A | ✅ Verified |
+| 3 | Knowledge graph | ✅ Verified |
+| 4 | Gap detection | ⚠️ Runs; assessment layer is weak |
+| 5 | Hypothesis generation | ✅ Verified |
+| 6 | Experiment design | ✅ Verified |
 | 7 | macOS app (SwiftUI) | 🔨 Core loop built |
 | 7b–9 | Web UI, auth, mobile | Not started |
 
-**What ⚠️ means, plainly:** every phase is built and tested, but no model has ever produced a
-real answer for this codebase — there's been no API key, and no local model has been run either.
-The deterministic halves (retrieval ranking, graph traversal, gap detection, the restatement and
-testability guards) are verified against real data. The model-dependent halves are tested against
-mocks only, so *quality* is unproven throughout.
+The whole arc has now run end to end on real papers, on a **local model with no API key** —
+question → cited answer → concept graph → gaps → hypothesis → experiment design.
 
-229 tests, single user, no auth. See [Phases.md](Phases.md) for the sequence and
+From a real detected gap between `EVOR` (a code-generation retrieval system) and `aligned
+visual captions`, it proposed: *"EVOR, adapted to use aligned visual captions in its knowledge
+base, will show improved execution accuracy on code generation tasks involving visual
+elements"* — then designed the ablation to test it, over the benchmark from EVOR's own paper.
+
+**What ⚠️ still means:** gap detection *runs*, and its structural half is good — a hub-degree
+penalty removed 82% of candidates that were artifacts of graph topology rather than holes in
+the literature. But the layer that judges whether a gap is *interesting* is weak: across two
+model sizes it rated every surviving gap 2 on a 1–3 scale, never once using 1 or 3. It is a
+weak binary filter wearing a rating scale.
+
+The pattern across the project: **everything deterministic works; everything left to model
+judgement underperforms.** Retrieval ranking, graph traversal, the hub penalty, concept
+identity, the restatement and testability guards — all verified against real data. Citation
+integrity has never once been violated.
+
+246 tests, single user, no auth. See [Phases.md](Phases.md) for the sequence and
 [Memory.md](Memory.md) for live state, decisions, and known gaps.
 
 ## Quickstart
@@ -131,7 +144,14 @@ without an API key.
   citation graph.
 - Titles and abstracts only, no full text.
 - No vector index yet (sequential scan); fine at this corpus size, revisit when it isn't.
-- **No model output has ever been reviewed.** Synthesis, concept extraction, contradiction
-  judging, gap assessment, hypothesis generation and experiment design are all plumbing-tested
-  against mocks. Whether any of them produce *good* output is genuinely unknown.
-- The Mac app has only ever rendered its "backend unavailable" state, for the same reason.
+- **Gap *significance* judgement is unreliable.** Two model sizes, 7B and 14B, both rated every
+  surviving gap 2 on a 1–3 scale. Doubling the model bought exactly one extra rejection. The
+  fix is deterministic, not a bigger model: filter gap endpoints by embedding distance so
+  generic bridges like `dataset` die before a model is asked.
+- **`RAG` and `Retrieval-Augmented Generation` are still two concepts.** `normalize()` collapses
+  case, plurals, hyphens and parenthetical glosses, but cannot know an acronym equals its
+  expansion. That needs entity resolution over the embeddings already in the project.
+- Only 27 of 55 ingested papers are in the graph — `/graph/build` has no cursor, so it can only
+  ever process papers 1..N.
+- Claude has never been tested on any of this; there has been no API key. The ceiling of a
+  frontier model on these tasks is unknown.

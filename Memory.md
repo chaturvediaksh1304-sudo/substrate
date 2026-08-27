@@ -32,10 +32,10 @@ the first real extraction run so seeded rows can't be mistaken for extracted one
 |---|---|
 | 1 — Foundation & Ingestion | ✅ Verified, all four done-criteria met |
 | 2 — RAG Q&A (MVP) | ✅ **All 5 criteria met 2026-08-26** — first real cited answers, via local Ollama |
-| 3 — Knowledge graph | ⚠️ Built, all three done-criteria met — extraction *quality* unproven (no API key) |
-| 4 — Gap detection | ⚠️ All 4 parts built, three done-criteria met structurally — gap *quality* unproven (no API key) |
-| 5 — Hypothesis generation | ⚠️ Built, 2/3 criteria met structurally — criterion 3 ("reviewed for quality") is unmeetable without a key |
-| 6 — Experiment design | ⚠️ Built, criterion 1 met structurally — criterion 2 ("reviewed for usefulness") needs a key |
+| 3 — Knowledge graph | ✅ Built and run for real — 27 papers, 104 concepts, 89 edges, 0 orphans, 5 cross-paper concepts |
+| 4 — Gap detection | ⚠️ Run for real; hub artifacts fixed (82%→0%). Assessment layer still weak — see the model experiment below |
+| 5 — Hypothesis generation | ✅ **All 3 criteria met 2026-08-26** — real gap → specific falsifiable hypothesis |
+| 6 — Experiment design | ✅ **Both criteria met 2026-08-26** — real hypothesis → runnable ablation over EVOR-BENCH |
 | 7 — macOS app | 🔨 Core loop built and visually verified; browse-graph/gaps screens and a live answer still pending |
 | 7b — Web UI | Not started; keeps the web-only pre-launch checklist |
 | 8–9 | Not started. Phase 9 (mobile) reuses `SubstrateCore` unchanged — see Design.md for the UI standards |
