@@ -31,7 +31,7 @@ the first real extraction run so seeded rows can't be mistaken for extracted one
 | Phase | State |
 |---|---|
 | 1 — Foundation & Ingestion | ✅ Verified, all four done-criteria met |
-| 2 — RAG Q&A (MVP) | ⚠️ Built, 4/5 verified — live end-to-end answer needs an API key |
+| 2 — RAG Q&A (MVP) | ✅ **All 5 criteria met 2026-08-26** — first real cited answers, via local Ollama |
 | 3 — Knowledge graph | ⚠️ Built, all three done-criteria met — extraction *quality* unproven (no API key) |
 | 4 — Gap detection | ⚠️ All 4 parts built, three done-criteria met structurally — gap *quality* unproven (no API key) |
 | 5 — Hypothesis generation | ⚠️ Built, 2/3 criteria met structurally — criterion 3 ("reviewed for quality") is unmeetable without a key |
@@ -357,6 +357,15 @@ synchronous), `feedparser` (stdlib `xml.etree.ElementTree` parses arXiv's Atom).
 - **Gap assessment has never run against the live model** — significance ratings and rationales
   are plumbing-tested only. Whether Claude can tell a real research gap from an obvious or
   extraction-artifact one is the entire value of part 3, and it is unproven.
+- **First real `/ask`, 2026-08-26** (`qwen2.5:7b-instruct`, ~14s): the pipeline is correct —
+  retrieval finds the right papers, citations map to real rows, indices resolve. Quality of the
+  *prose* is mediocre: it writes in an annotated-bibliography voice ("[1] describes…") instead
+  of synthesising, and one answer contradicted itself ("the papers do not directly discuss
+  chunking" immediately after summarising two papers that do). A stronger model would likely fix
+  the voice; the plumbing needs no change.
+- **It also refuses honestly.** "How can retrieval hurt generation quality?" returned `found:
+  true` with 5 chunks but **zero citations** and a plain statement that the passages don't
+  answer it — rather than fabricating. Arguably over-cautious, but the right failure direction.
 - **Extraction quality, measured 2026-08-25 against `qwen2.5:7b-instruct` (first real run):**
   Before the fixes — 3 papers → 44 concepts / 7 edges, **75% orphans**, 0 cross-paper links.
   After `MAX_CONCEPTS=8` + the orphan guard — 2 fresh papers → 13 concepts / 16 edges,

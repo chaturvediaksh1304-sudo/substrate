@@ -18,7 +18,10 @@ Each phase is a loop: implement → verify against done-criteria → fix → re-
   - [ ] Orchestrator agent receives the question and delegates to a retrieval worker agent
   - [ ] Retrieval worker embeds the question and retrieves top-k relevant chunks from the vector store
   - [ ] Retrieved chunks + question are sent to Claude and return a synthesized, cited answer
-  - [ ] End-to-end test: real question → real papers ingested → coherent cited answer
+  - [x] End-to-end test: real question → real papers ingested → coherent cited answer
+        **Met 2026-08-26** via `qwen2.5:7b-instruct` on Ollama. "How is RAG evaluated?" returned
+        a correct summary of Ragas citing the real Ragas paper. Style is weak (annotated-
+        bibliography voice, one self-contradiction); the pipeline and citation mapping are correct.
 - Depends on: Phase 1
 
 ## Phase 3: Knowledge Graph
