@@ -4,7 +4,7 @@ from dataclasses import dataclass
 from typing import Any
 
 import anthropic
-from sqlalchemy import desc, distinct, exists, func, select
+from sqlalchemy import Float, desc, distinct, exists, func, select
 from sqlalchemy.orm import Session, aliased
 
 from app.agents.claude import MissingAPIKeyError, _client
@@ -37,7 +37,42 @@ DEFAULT_LIMIT = 50
 # ponytail: the mean is the crudest centre there is, and the hubs drag it upward a little.
 # If a corpus ever grows a long enough tail to matter, swap `avg` for `percentile_cont` —
 # same one scalar subquery, a median or a 95th percentile instead.
-HUB_DEGREE_FACTOR = 2
+# A bridge is uninformative when it is *ubiquitous*, not when it has many edges. Measured on
+# the live 53-paper graph: `large language models` and `retrieval-augmented generation` each
+# appear in 13 papers (24.5%), while the next most common bridge, `knowledge graph`, appears in
+# 4 (7.5%) and everything else in under 4%. Nothing lies between 7.5% and 24.5%, so 15% sits in
+# an empty band rather than on a knife edge.
+#
+# Raw degree was the previous instrument and it was the wrong one: it cannot tell a concept in
+# 13 papers with degree 18 — genuinely central, exactly what should bridge — from a concept in
+# one verbose abstract with degree 18. It excluded 8 of the 11 cross-paper concepts in the
+# graph, leaving only the ones too trivial to have accumulated edges.
+#
+# ponytail: a flat fraction. The principled version is IDF — weight each bridge by
+# log(papers / papers_containing) and let it fall out of the ranking rather than a cutoff —
+# worth doing when there is enough corpus to fit a weight against.
+HUB_PAPER_FRACTION = 0.15
+
+# ...but a fraction alone is wrong on a small corpus: 15% of four papers is 0.6, which is below
+# any real bridge's paper count, so every bridge would be dropped and gap detection would return
+# nothing at all. Ubiquity is meaningless when there are not enough papers to be ubiquitous in,
+# so a bridge is only ever dropped for ubiquity once it clears this floor as well.
+MIN_UBIQUITOUS_PAPERS = 3
+
+# Ubiquity is only half of it. A concept can also be uninformative by being *one verbose
+# abstract*: six concepts declared from a single paper make fifteen open triads, none of which
+# is a hole in the literature. Ubiquity cannot see that — the concept is in one paper, which
+# looks maximally specific — so fan-out, a concept's edges per paper it appears in, is the
+# second guard.
+#
+# The two catch opposite failures and neither substitutes for the other:
+#   `retrieval-augmented generation`  18 edges / 13 papers = 1.4 fan-out, but 25% of the corpus
+#                                     -> ubiquitous, dropped
+#   a six-point star in one paper      6 edges /  1 paper  = 6.0 fan-out, 2% of the corpus
+#                                     -> verbose, dropped
+#   `knowledge graph`                  8 edges /  4 papers = 2.0 fan-out, 7.5% of the corpus
+#                                     -> a real bridge, kept
+FAN_OUT_CAP = 3
 
 
 @dataclass
@@ -68,10 +103,10 @@ def find_open_triads(
     to 1 — no filtering — because a gap's cross-paper-ness is a ranking input (part 3),
     not a precondition, and a stricter default would silently return nothing on a small graph.
 
-    Bridges above `HUB_DEGREE_FACTOR` times the graph's mean degree are dropped — a hub
-    tells you nothing about the pairs it sits between. It drops the leg, not the pair: a
-    gap a hub and an ordinary concept both bridge is still reported, bridged by the
-    ordinary one.
+    Bridges appearing in more than `HUB_PAPER_FRACTION` of the corpus are dropped — a concept
+    most papers mention tells you nothing about the pairs it sits between. It drops the leg,
+    not the pair: a gap that a ubiquitous concept and an ordinary one both bridge is still
+    reported, bridged by the ordinary one.
 
     An empty graph, or one with no open triads, is `[]` — a result, not an error.
     """
@@ -98,15 +133,26 @@ def find_open_triads(
     # One row per concept that has any edge, and one number for the whole graph to compare
     # them against. Orphans are absent from both, which is right: they bridge nothing and
     # would only drag the mean down.
-    degree = (
+    spread = (
         select(
             undirected.c.src.label("id"),
-            func.count(distinct(undirected.c.dst)).label("degree"),
+            func.count(distinct(undirected.c.paper_id)).label("papers"),
+            (
+                func.count(distinct(undirected.c.dst)).cast(Float)
+                / func.count(distinct(undirected.c.paper_id))
+            ).label("fan_out"),
         )
         .group_by(undirected.c.src)
-        .cte("degree")
+        .cte("spread")
     )
-    hub_cap = select(HUB_DEGREE_FACTOR * func.avg(degree.c.degree)).scalar_subquery()
+    # The corpus is the papers that actually contributed an edge; papers with no extracted
+    # graph would only deflate every fraction.
+    ubiquity_cap = select(
+        func.greatest(
+            HUB_PAPER_FRACTION * func.count(distinct(ConceptEdge.paper_id)),
+            MIN_UBIQUITOUS_PAPERS,
+        )
+    ).scalar_subquery()
 
     # Least/greatest is the whole dedup: the triad is found once as A->B->C and again as
     # C->B->A, and both collapse onto the same group.
@@ -126,11 +172,13 @@ def find_open_triads(
         .select_from(leg)
         .join(next_leg, next_leg.c.src == leg.c.dst)
         .join(bridge, bridge.id == leg.c.dst)
-        .join(degree, degree.c.id == leg.c.dst)
+        .join(spread, spread.c.id == leg.c.dst)
         .where(
-            # A hub is not a bridge. Dropping it here rather than after the fact is what
-            # keeps it out of `bridge_count` and out of the top of the ranking.
-            degree.c.degree <= hub_cap,
+            # Neither a ubiquitous concept nor one verbose abstract's fan-out is a bridge.
+            # Dropping them here rather than after the fact is what keeps them out of
+            # `bridge_count` and out of the top of the ranking.
+            spread.c.papers <= ubiquity_cap,
+            spread.c.fan_out <= FAN_OUT_CAP,
             # A -> B -> A is a round trip, not a missing link.
             leg.c.src != next_leg.c.dst,
             # The link is only missing if it is missing in both directions — a C->A edge

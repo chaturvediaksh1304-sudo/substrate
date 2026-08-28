@@ -430,11 +430,27 @@ synchronous), `feedparser` (stdlib `xml.etree.ElementTree` parses arXiv's Atom).
   concept in 13 papers with degree 22 is genuinely central to the literature and is *exactly*
   what should bridge; a concept in 1 paper with degree 18 is one verbose abstract. The penalty
   treats them identically and removes both.
-- **Proposed fix (deterministic, same pattern as every fix that has worked here): penalise
-  degree *concentrated within few papers*, not raw degree.** Roughly `degree / distinct_papers`
-  — high means one abstract's verbosity, low means a concept genuinely spread across the
-  literature. That keeps `retrieval-augmented generation` (18/13 ≈ 1.4) as a legitimate bridge
-  while still cutting a single-paper artifact (18/1). Not yet implemented.
+- **Fixed 2026-08-26 — the hub penalty now uses two guards, not raw degree.** Raw degree
+  conflated two opposite failures and removed both. Replaced with:
+  - **Ubiquity** — a bridge in more than `HUB_PAPER_FRACTION` (0.15) of papers-with-edges is
+    dropped. Measured band: the two hubs sit at 24.5% of the corpus, the next bridge at 7.5%,
+    nothing between. Floored at `MIN_UBIQUITOUS_PAPERS = 3`, because 15% of a four-paper corpus
+    is 0.6 and a bare fraction would drop *every* bridge and return nothing — a real flaw the
+    existing tests caught.
+  - **Fan-out** — edges per paper the concept appears in, capped at `FAN_OUT_CAP = 3`. Catches
+    the opposite failure that ubiquity cannot see: six concepts declared from one verbose
+    abstract make fifteen triads while looking maximally specific.
+  Neither substitutes for the other: `retrieval-augmented generation` is fan-out 1.4 but 25% of
+  the corpus; a six-point single-paper star is 2% of the corpus but fan-out 6.0.
+- **Result on the live graph: cross-paper triads 3 → 54**, and the junk bridges are gone.
+  Previously two of three were bridged by `state-of-the-art performance` and `neural network`;
+  now bridges are `knowledge acquisition`, `knowledge graph embeddings`, `fine-tuning`,
+  `model protein`. Sample: `learning dynamics ↔ hallucinations` via knowledge acquisition;
+  `retrieval-augmented generation ↔ knowledge acquisition` via fine-tuning.
+- **⚠️ Remaining: near-duplicate gaps.** `knowledge graph` bridges 7 of the top 14, every one
+  pairing `large language models` with a different neighbour of one paper. One bridge plus one
+  endpoint still fans out into many near-identical gaps. Dedup by endpoint, or cap gaps per
+  (bridge, endpoint) pair, is the next deterministic step.
 - **⚠️ But cross-paper triads fell to 1**, and this is the method's real constraint, not a bug.
   Merging the acronym made `retrieval-augmented generation` a degree-14 hub in a 158-concept
   graph whose mean degree is ~1.8, so the hub penalty (2× mean ≈ 3.6) now correctly excludes it

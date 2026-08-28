@@ -202,3 +202,58 @@ def test_a_bridge_one_edge_past_the_degree_cap_bridges_nothing(db_session):
     star(db_session, points=4)
 
     assert gaps.find_open_triads(db_session) == []
+
+
+# --- ubiquity, not degree, is what makes a bridge uninformative ----------------------------
+
+
+def test_a_bridge_in_most_of_the_corpus_is_dropped(db_session):
+    """A concept in a large fraction of papers says nothing about any two of its neighbours."""
+    papers = [add_paper(db_session, f"p{i}", f"Paper {i}") for i in range(20)]
+    ubiquitous = add_concept(db_session, "large language models")
+    for i, paper in enumerate(papers[:16]):
+        left = add_concept(db_session, f"left {i}")
+        right = add_concept(db_session, f"right {i}")
+        link(db_session, left, "uses", ubiquitous, paper)
+        link(db_session, ubiquitous, "enables", right, paper)
+    found = gaps.find_open_triads(db_session, limit=200)
+    assert not any("large language models" in g.bridges for g in found)
+
+
+def test_a_bridge_in_few_papers_with_ordinary_fan_out_still_bridges(db_session):
+    """The case raw degree got backwards: a concept can carry several edges and still be
+    specific, so long as they are not all one abstract's fan-out.
+
+    A cap keyed on the graph's mean *degree* excluded this concept — it excluded 8 of the 11
+    cross-paper concepts in the live graph. Ubiquity and fan-out together keep it: two papers,
+    two edges each, is a narrow concept rather than either a hub or a verbose abstract.
+    """
+    papers = [add_paper(db_session, f"p{i}", f"Paper {i}") for i in range(20)]
+    focused = add_concept(db_session, "model protein")
+    a = add_concept(db_session, "discrete molecular dynamics")
+    b = add_concept(db_session, "rosenbluth method")
+    link(db_session, a, "simulates", focused, papers[0])
+    link(db_session, focused, "is sampled by", b, papers[1])
+    # Two more edges, one per paper: degree 4 over 2 papers is fan-out 2.0 — under the cap.
+    link(db_session, focused, "relates to", add_concept(db_session, "lattice model"), papers[0])
+    link(db_session, focused, "relates to", add_concept(db_session, "energy landscape"), papers[1])
+    reported = {tuple(sorted((g.concept_a, g.concept_b))) for g in gaps.find_open_triads(db_session, limit=200)}
+    assert ("discrete molecular dynamics", "rosenbluth method") in reported
+
+
+def test_a_bridge_whose_edges_are_one_abstracts_fan_out_is_dropped(db_session):
+    """Few papers is not enough to be a bridge — six edges from two papers is verbosity."""
+    papers = [add_paper(db_session, f"p{i}", f"Paper {i}") for i in range(20)]
+    verbose = add_concept(db_session, "system")
+    for i in range(8):  # degree 8 over 2 papers = fan-out 4.0, past the cap
+        link(db_session, verbose, "involves", add_concept(db_session, f"thing {i}"), papers[i % 2])
+    assert not any("system" in g.bridges for g in gaps.find_open_triads(db_session, limit=200))
+
+
+def test_a_bridge_in_a_couple_of_papers_still_bridges(db_session):
+    papers = [add_paper(db_session, f"p{i}", f"Paper {i}") for i in range(10)]
+    bridge = add_concept(db_session, "model protein")
+    a, b = add_concept(db_session, "aaa"), add_concept(db_session, "bbb")
+    link(db_session, a, "informs", bridge, papers[0])
+    link(db_session, bridge, "informs", b, papers[1])
+    assert any("model protein" in g.bridges for g in gaps.find_open_triads(db_session, limit=200))
