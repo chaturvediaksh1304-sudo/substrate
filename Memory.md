@@ -404,6 +404,37 @@ synchronous), `feedparser` (stdlib `xml.etree.ElementTree` parses arXiv's Atom).
   expansion, so this is insurance against an inconsistent extractor — it is simply not what
   improved this particular run. **Lesson: an absent duplicate row is not evidence a
   deduplicator ran.**
+- **Corpus broadened 2026-08-26: 55 → 267 papers** across six adjacent areas (RAG, knowledge
+  graph construction, representation learning, hallucination/factuality, agent memory, IR
+  evaluation). Graph extracted over 53 of them: **325 concepts, 337 edges, 0 orphans**.
+- **⚠️ The decisive finding: the hub penalty excludes 8 of the 11 cross-paper concepts.**
+  Degree distribution is a power law — 176 concepts at degree 1, 85 at 2, 32 at 3, tailing to
+  three hubs at 18/19/22. Mean degree 1.92, so the 2× cap sits at 3.83. Every concept that
+  spans multiple papers sits *above* it:
+
+  | concept | papers | degree | bridges? |
+  |---|---|---|---|
+  | large language models | 13 | 22 | excluded |
+  | retrieval-augmented generation | 13 | 18 | excluded |
+  | representation learning | 3 | 19 | excluded |
+  | knowledge graph | 4 | 8 | excluded |
+  | generative retrieval | 2 | 4 | excluded |
+  | neural network | 2 | 2 | allowed |
+  | state-of-the-art performance | 2 | 2 | allowed |
+  | model protein | 2 | 2 | allowed |
+
+  Cross-paper triads went 1 → 3, but two of the three are bridged by **junk** —
+  `state-of-the-art performance` and `neural network`. The survivors are the concepts too
+  trivial to have accumulated edges.
+- **Diagnosis: raw degree is the wrong instrument.** It conflates two opposite things — a
+  concept in 13 papers with degree 22 is genuinely central to the literature and is *exactly*
+  what should bridge; a concept in 1 paper with degree 18 is one verbose abstract. The penalty
+  treats them identically and removes both.
+- **Proposed fix (deterministic, same pattern as every fix that has worked here): penalise
+  degree *concentrated within few papers*, not raw degree.** Roughly `degree / distinct_papers`
+  — high means one abstract's verbosity, low means a concept genuinely spread across the
+  literature. That keeps `retrieval-augmented generation` (18/13 ≈ 1.4) as a legitimate bridge
+  while still cutting a single-paper artifact (18/1). Not yet implemented.
 - **⚠️ But cross-paper triads fell to 1**, and this is the method's real constraint, not a bug.
   Merging the acronym made `retrieval-augmented generation` a degree-14 hub in a 158-concept
   graph whose mean degree is ~1.8, so the hub penalty (2× mean ≈ 3.6) now correctly excludes it
