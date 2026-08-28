@@ -442,11 +442,25 @@ synchronous), `feedparser` (stdlib `xml.etree.ElementTree` parses arXiv's Atom).
     abstract make fifteen triads while looking maximally specific.
   Neither substitutes for the other: `retrieval-augmented generation` is fan-out 1.4 but 25% of
   the corpus; a six-point single-paper star is 2% of the corpus but fan-out 6.0.
-- **Result on the live graph: cross-paper triads 3 → 54**, and the junk bridges are gone.
-  Previously two of three were bridged by `state-of-the-art performance` and `neural network`;
-  now bridges are `knowledge acquisition`, `knowledge graph embeddings`, `fine-tuning`,
-  `model protein`. Sample: `learning dynamics ↔ hallucinations` via knowledge acquisition;
-  `retrieval-augmented generation ↔ knowledge acquisition` via fine-tuning.
+- **Result on the live graph: cross-paper triads 3 → 93.**
+  **Correction:** an interim figure of 54 was reported from a mid-run snapshot. The extraction
+  had not died — a `pgrep` on the wrong pattern (the process was `python -c`, with no matching
+  filename) made a live run look dead, and a second extraction was started alongside it. Both
+  completed; the duplication was wasted work but harmless, since extraction is idempotent.
+  Final graph: **79 papers, 556 concepts, 629 edges**.
+- **Both guards scale correctly at 79 papers** (ubiquity cap 11.85):
+
+  | concept | papers | degree | fan-out | verdict |
+  |---|---|---|---|---|
+  | large language models | 19 | 25 | 1.3 | ubiquitous — dropped |
+  | retrieval-augmented generation | 16 | 24 | 1.5 | ubiquitous — dropped |
+  | hallucinations | 4 | 18 | 4.5 | verbose — dropped |
+  | representation learning | 3 | 17 | 5.7 | verbose — dropped |
+  | knowledge graph | 5 | 9 | 1.8 | **bridges** |
+  | fine-tuning | 3 | 8 | 2.7 | **bridges** |
+
+  Each guard is doing distinct work at this scale: two concepts dropped for ubiquity, two for
+  fan-out, and neither would have been caught by the other.
 - **⚠️ Remaining: near-duplicate gaps.** `knowledge graph` bridges 7 of the top 14, every one
   pairing `large language models` with a different neighbour of one paper. One bridge plus one
   endpoint still fans out into many near-identical gaps. Dedup by endpoint, or cap gaps per
