@@ -389,9 +389,21 @@ synchronous), `feedparser` (stdlib `xml.etree.ElementTree` parses arXiv's Atom).
   **Do not retry this approach.** No migration, no `Vector(384)` column on `concepts`.
 - **Graph re-extracted 2026-08-26 with acronym resolution live** (wipe approved), on
   `qwen2.5:14b-instruct`: **30 papers, 0 failed, 158 concepts, 143 edges, 0 orphans**
-  (previous run: 27 papers, 3 failed, 104 concepts, 89 edges). No separate `rag`, `llm` or
-  `cot` row exists — the merge held. `retrieval-augmented generation` now spans **13 papers**,
-  up from 5, and `large language models` 8, up from 5.
+  (previous run: 27 papers, 3 failed, 104 concepts, 89 edges).
+- **⚠️ Correction — the acronym merge did NOT cause the improvement.** No `rag`/`llm`/`cot` row
+  exists after this run, and `retrieval-augmented generation` spans 13 papers rather than 5.
+  That was first attributed to the resolver. It is not. Tested directly: **the 14B never emits
+  bare acronyms.** On a paper titled "…NLP Techniques and LLM-Based Retrieval…" it extracted
+  `Natural Language Processing Techniques`, `Retrieval-Augmented Generation`, `Large Language
+  Model` — every form expanded. Even "AR-RAG" became "Autoregressive Retrieval Augmentation".
+  So the resolver almost certainly never fired; the concentration is the **model change** plus
+  three more papers processed.
+- **The resolver is still verified and still worth keeping.** `_acronym_row("rag")` returns the
+  expansion's row id against the live graph and `_concept_id` creates no new row (tested in a
+  rolled-back transaction; a control concept still inserts). The 7B *did* split `RAG` from its
+  expansion, so this is insurance against an inconsistent extractor — it is simply not what
+  improved this particular run. **Lesson: an absent duplicate row is not evidence a
+  deduplicator ran.**
 - **⚠️ But cross-paper triads fell to 1**, and this is the method's real constraint, not a bug.
   Merging the acronym made `retrieval-augmented generation` a degree-14 hub in a 158-concept
   graph whose mean degree is ~1.8, so the hub penalty (2× mean ≈ 3.6) now correctly excludes it
