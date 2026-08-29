@@ -5,19 +5,19 @@ Each phase is a loop: implement → verify against done-criteria → fix → re-
 ## Phase 1: Foundation & Ingestion
 - Goal: FastAPI project skeleton running locally in Docker, Postgres+pgvector configured, and a working pipeline that pulls papers from Semantic Scholar/arXiv for a given topic, chunks them, embeds them, and stores them.
 - Done-criteria:
-  - [ ] FastAPI app boots in Docker with a health-check endpoint
-  - [ ] Postgres + pgvector schema exists and migrations run cleanly
-  - [ ] Given a topic string, ingestion pipeline pulls N papers from Semantic Scholar/arXiv, chunks, embeds, and persists them
-  - [ ] Tests cover ingestion + storage happy path and at least one failure case (e.g. API timeout) without crashing the batch
+  - [x] FastAPI app boots in Docker with a health-check endpoint
+  - [x] Postgres + pgvector schema exists and migrations run cleanly
+  - [x] Given a topic string, ingestion pipeline pulls N papers from Semantic Scholar/arXiv, chunks, embeds, and persists them
+  - [x] Tests cover ingestion + storage happy path and at least one failure case (e.g. API timeout) without crashing the batch
 - Depends on: none
 
 ## Phase 2: RAG Q&A (MVP)
 - Goal: A question in, cited answer out — the MVP success criterion from PRD.md. Also scaffolds the orchestrator/worker agent pattern that later phases plug into.
 - Done-criteria:
-  - [ ] API endpoint accepts a research question
-  - [ ] Orchestrator agent receives the question and delegates to a retrieval worker agent
-  - [ ] Retrieval worker embeds the question and retrieves top-k relevant chunks from the vector store
-  - [ ] Retrieved chunks + question are sent to Claude and return a synthesized, cited answer
+  - [x] API endpoint accepts a research question
+  - [x] Orchestrator agent receives the question and delegates to a retrieval worker agent
+  - [x] Retrieval worker embeds the question and retrieves top-k relevant chunks from the vector store
+  - [x] Retrieved chunks + question are sent to Claude and return a synthesized, cited answer
   - [x] End-to-end test: real question → real papers ingested → coherent cited answer
         **Met 2026-08-26** via `qwen2.5:7b-instruct` on Ollama. "How is RAG evaluated?" returned
         a correct summary of Ragas citing the real Ragas paper. Style is weak (annotated-
@@ -27,24 +27,24 @@ Each phase is a loop: implement → verify against done-criteria → fix → re-
 ## Phase 3: Knowledge Graph
 - Goal: Concepts and relationships extracted from ingested papers, stored as a graph, linked across papers — implemented as a graph worker agent under the orchestrator.
 - Done-criteria:
-  - [ ] Graph storage integrated alongside the existing schema (`concepts` + `concept_edges` in Postgres; Neo4j dropped at Phase 3 scoping — see Architecture.md)
-  - [ ] Graph worker agent extracts concepts and populates nodes/edges from ingested papers
-  - [ ] Orchestrator can delegate a graph-traversal task to the graph agent and get relationships between concepts across multiple papers
+  - [x] Graph storage integrated alongside the existing schema (`concepts` + `concept_edges` in Postgres; Neo4j dropped at Phase 3 scoping — see Architecture.md)
+  - [x] Graph worker agent extracts concepts and populates nodes/edges from ingested papers
+  - [x] Orchestrator can delegate a graph-traversal task to the graph agent and get relationships between concepts across multiple papers
 - Depends on: Phase 2
 
 ## Phase 4: Gap Detection
 - Goal: Identify under-connected or contradictory areas in the knowledge graph — implemented as a gap-detection worker agent under the orchestrator.
 - Done-criteria:
-  - [ ] Gap-detection agent flags sparse or missing connections between related concept clusters
-  - [ ] Gap-detection agent flags contradictory claims across papers on the same concept
-  - [ ] Output is a structured list of candidate gaps, not just raw graph stats
+  - [x] Gap-detection agent flags sparse or missing connections between related concept clusters
+  - [x] Gap-detection agent flags contradictory claims across papers on the same concept
+  - [x] Output is a structured list of candidate gaps, not just raw graph stats
 - Depends on: Phase 3
 
 ## Phase 5: Hypothesis Generation
 - Goal: Given a detected gap, propose a testable hypothesis — implemented as a hypothesis worker agent under the orchestrator.
 - Done-criteria:
-  - [ ] Hypothesis agent takes a gap + supporting graph/paper context and produces a hypothesis
-  - [ ] Hypothesis is specific and falsifiable, not a vague restatement of the gap
+  - [x] Hypothesis agent takes a gap + supporting graph/paper context and produces a hypothesis
+  - [x] Hypothesis is specific and falsifiable, not a vague restatement of the gap
   - [x] Test covers at least one real gap → hypothesis case reviewed for quality
         **Met 2026-08-26.** Real gap (EVOR ↔ aligned visual captions) → "EVOR, adapted to use
         aligned visual captions in its knowledge base, will show improved execution accuracy on
@@ -56,7 +56,7 @@ Each phase is a loop: implement → verify against done-criteria → fix → re-
 ## Phase 6: Experiment Design
 - Goal: Turn a hypothesis into a structured experiment proposal — implemented as an experiment-design worker agent under the orchestrator.
 - Done-criteria:
-  - [ ] Experiment-design agent, given a hypothesis, outputs a structured experiment design (method, variables, expected outcome)
+  - [x] Experiment-design agent, given a hypothesis, outputs a structured experiment design (method, variables, expected outcome)
   - [x] Output is reviewed against at least one real hypothesis from Phase 5 for usefulness
         **Met 2026-08-26.** A real ablation: two EVOR variants, with and without aligned visual
         captions, over EVOR-BENCH, measuring execution accuracy — naming a benchmark that comes

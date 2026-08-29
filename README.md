@@ -28,18 +28,23 @@ visual captions`, it proposed: *"EVOR, adapted to use aligned visual captions in
 base, will show improved execution accuracy on code generation tasks involving visual
 elements"* — then designed the ablation to test it, over the benchmark from EVOR's own paper.
 
-**What ⚠️ still means:** gap detection *runs*, and its structural half is good — a hub-degree
-penalty removed 82% of candidates that were artifacts of graph topology rather than holes in
-the literature. But the layer that judges whether a gap is *interesting* is weak: across two
-model sizes it rated every surviving gap 2 on a 1–3 scale, never once using 1 or 3. It is a
-weak binary filter wearing a rating scale.
+**What ⚠️ still means:** gap detection *runs*, and its structural half is good. Two
+deterministic guards decide what may bridge a gap — **ubiquity** (a concept in >15% of papers
+tells you nothing about any two of its neighbours) and **fan-out** (>3 edges per paper it
+appears in is one verbose abstract, not a concept). They catch opposite failures and neither
+substitutes for the other. Together they took cross-paper gaps from 1 to 93 on an 82-paper
+graph while removing the junk bridges.
+
+But the layer that judges whether a gap is *interesting* is weak: across two model sizes it
+rated every surviving gap 2 on a 1–3 scale, never once using 1 or 3. A weak binary filter
+wearing a rating scale.
 
 The pattern across the project: **everything deterministic works; everything left to model
 judgement underperforms.** Retrieval ranking, graph traversal, the hub penalty, concept
 identity, the restatement and testability guards — all verified against real data. Citation
 integrity has never once been violated.
 
-246 tests, single user, no auth. See [Phases.md](Phases.md) for the sequence and
+264 tests, single user, no auth. See [Phases.md](Phases.md) for the sequence and
 [Memory.md](Memory.md) for live state, decisions, and known gaps.
 
 ## Quickstart
@@ -112,8 +117,9 @@ second store bought nothing at this size. See [Architecture.md](Architecture.md)
 
 Gap detection looks for **open triads** — A links to B, B links to C, nobody linked A to C —
 and for **cross-paper contradictions**, where different papers assert different relations about
-the same concept pair. A deterministic prescore ranks candidates before any model call, so
-spend follows the request limit rather than the size of the graph.
+the same concept pair. Bridges are filtered by ubiquity and fan-out first, then a deterministic
+prescore ranks what survives before any model call, so spend follows the request limit rather
+than the size of the graph.
 
 There's also a native **SwiftUI macOS client** in [`mac/`](mac) — one window, no dependencies,
 built with SwiftPM.

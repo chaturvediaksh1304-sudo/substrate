@@ -341,3 +341,26 @@ def test_build_route_upstream_anthropic_failure_returns_503(monkeypatch):
 
     assert response.status_code == 503
     assert "claude" in response.json()["detail"].lower()
+
+
+def test_build_route_skips_papers_that_already_have_a_graph(db_session, monkeypatch):
+    """Without this the route is a treadmill: it takes papers 1..N by id every time, so once
+    the first N are extracted there is no way to reach paper N+1 and no way to resume."""
+    import app.main as main
+
+    done = add_paper(db_session, "done", "Already Extracted")
+    todo_a = add_paper(db_session, "todo-a", "Not Yet A")
+    todo_b = add_paper(db_session, "todo-b", "Not Yet B")
+    a, b = add_concept(db_session, "alpha"), add_concept(db_session, "beta")
+    link(db_session, a, "improves", b, done)
+    db_session.commit()
+
+    worker = install(monkeypatch, StubGraphWorker())
+    monkeypatch.setattr(main, "SessionLocal", lambda: db_session)
+    monkeypatch.setattr(db_session, "close", lambda: None)
+
+    client.post("/graph/build", json={"limit": 10})
+
+    handed = {p.id for p in worker.runs[0]}
+    assert done.id not in handed, "a paper with edges was re-extracted"
+    assert handed == {todo_a.id, todo_b.id}

@@ -6,23 +6,16 @@ changed — not at phase boundaries (`Rules.md:31`).
 > **Note:** this structure is a stand-in. Aksh has a template to supply; replace this layout
 > with it when it arrives, keeping the content.
 
-**Last updated:** 2026-08-26 — **local-model provider added.** `LLM_PROVIDER=ollama` swaps the
-Anthropic client for `app/agents/ollama.py` at the single `claude._client()` seam, so Substrate
-runs with no `ANTHROPIC_API_KEY`. Six call sites and five routes unchanged in behaviour. Backend:
-**229 tests pass, 1 skips**, eight routes.
+**Last updated:** 2026-08-26 — gap detection reworked and `/graph/build` unblocked.
+**264 tests pass, 1 skips**; 6 Swift tests; eight routes, all returning 200 live.
 
-**Phase 7 (macOS app) core loop built.** `mac/` holds a native
-SwiftUI client: `SubstrateCore` (Foundation only, 6 tests) + `SubstrateMac` (views).
+**Corpus:** 268 papers, 487 chunks, six adjacent areas (RAG, knowledge-graph construction,
+representation learning, hallucination/factuality, agent memory, IR evaluation). All arXiv —
+Semantic Scholar still 429s unauthenticated.
 
-**Phase 6 built: the backend arc is structurally complete.**
-Experiment design, `ExperimentWorker`, `POST /experiments`. 215 tests pass, 1 skips; eight
-routes; five worker agents under the orchestrator. Every LLM-free half is verified live; every
-Claude path is plumbing-tested only, still awaiting `ANTHROPIC_API_KEY`.
-
-**Corpus:** 55 papers, 107 chunks, all arXiv (Semantic Scholar still 429s). Topics: retrieval
-augmented generation (~50), protein folding diffusion models (5). Graph tables hold only 4
-hand-seeded concepts / 3 edges from traversal testing — **not model output**; clear them before
-the first real extraction run so seeded rows can't be mistaken for extracted ones.
+**Graph:** 575 concepts, 654 edges, 0 orphans, from 82 papers extracted. 186 papers remain
+unextracted; `POST /graph/build` now picks them up (see the cursor fix below), so repeated
+calls make progress.
 
 ---
 
@@ -32,8 +25,8 @@ the first real extraction run so seeded rows can't be mistaken for extracted one
 |---|---|
 | 1 — Foundation & Ingestion | ✅ Verified, all four done-criteria met |
 | 2 — RAG Q&A (MVP) | ✅ **All 5 criteria met 2026-08-26** — first real cited answers, via local Ollama |
-| 3 — Knowledge graph | ✅ Built and run for real — 27 papers, 104 concepts, 89 edges, 0 orphans, 5 cross-paper concepts |
-| 4 — Gap detection | ⚠️ Run for real; hub artifacts fixed (82%→0%). Assessment layer still weak — see the model experiment below |
+| 3 — Knowledge graph | ✅ Built and run for real — 82 papers extracted, 575 concepts, 654 edges, 0 orphans |
+| 4 — Gap detection | ⚠️ Run for real; bridges now filtered by ubiquity + fan-out, cross-paper gaps 1 → 93. Assessment layer still weak |
 | 5 — Hypothesis generation | ✅ **All 3 criteria met 2026-08-26** — real gap → specific falsifiable hypothesis |
 | 6 — Experiment design | ✅ **Both criteria met 2026-08-26** — real hypothesis → runnable ablation over EVOR-BENCH |
 | 7 — macOS app | 🔨 Core loop built and visually verified; browse-graph/gaps screens and a live answer still pending |
@@ -60,7 +53,9 @@ app/
                      LLM_PROVIDER (anthropic|ollama, Literal so bad values fail at boot);
                      OLLAMA_BASE_URL; OLLAMA_MODEL
   db.py              engine, SessionLocal, Base
-  models.py          Paper, Chunk — unique (source, external_id); Chunk.embedding Vector(384)
+  models.py          Paper, Chunk, Concept, ConceptEdge. Paper unique (source, external_id);
+                     Chunk.embedding Vector(384); Concept.normalized unique; edge unique
+                     (source, target, relation, paper_id)
   ingestion/
     __init__.py
     sources.py       PaperRecord; fetch_semantic_scholar(), fetch_arxiv()
@@ -101,6 +96,8 @@ app/
                      GapPaper. _candidates() gathers both signals, hydrates paper
                      titles in one query, prescores deterministically — no LLM.
                      GapWorker.run(session, limit=10) -> [CandidateGap]; name="gaps".
+                     Bridges filtered by HUB_PAPER_FRACTION (ubiquity, floored at
+                     MIN_UBIQUITOUS_PAPERS) and FAN_OUT_CAP (edges per paper). No LLM.
     hypothesis.py    generate_hypothesis(session, gap) -> Hypothesis | None; Hypothesis
                      (statement, manipulation, measurement, predicted_effect, falsifier,
                      papers from rows). restates_gap()/novel_terms() — deterministic
@@ -158,6 +155,13 @@ window cannot be captured. Visual verification instead goes through a throwaway 
 harness built from copies of the real view files (`ScrollView`→`VStack`, `TextField`→`Text`, the
 two things ImageRenderer cannot lay out). Granting Terminal Screen Recording would remove the
 workaround.
+
+- **`POST /graph/build` cursor fixed 2026-08-26.** It selected `ORDER BY id LIMIT n`, so once
+  papers 1..N were extracted there was no way to reach N+1 and no way to resume — with 189
+  papers unextracted the route could make no progress at all. It now selects papers that have
+  no edges yet, so repeated calls advance. Verified live: 189 → 186 unextracted after one call.
+  `ponytail:` a paper whose extraction yields nothing is retried on every call; add an
+  `attempted_at` column when the retries cost more than the re-extractions gain.
 
 ## Skills available (installed globally, 2026-08-25)
 

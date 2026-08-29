@@ -3,7 +3,7 @@ import logging
 import anthropic
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel, Field
-from sqlalchemy import select, text
+from sqlalchemy import exists, select, text
 
 from app.agents.experiment import EXPERIMENT_LIMIT, MAX_EXPERIMENTS
 from app.agents.gaps import RANK_LIMIT, CandidateGap
@@ -14,7 +14,7 @@ from app.agents.claude import unavailable
 from app.agents.synthesis import MissingAPIKeyError
 from app.db import SessionLocal, engine
 from app.ingestion.pipeline import IngestResult, ingest_topic
-from app.models import Paper
+from app.models import ConceptEdge, Paper
 
 app = FastAPI(title="Substrate")
 log = logging.getLogger(__name__)
@@ -75,7 +75,22 @@ class GraphBuildRequest(BaseModel):
 def graph_build(request: GraphBuildRequest) -> GraphResult:
     """Extract concepts and relationships from papers already ingested."""
     with SessionLocal() as session:
-        papers = session.execute(select(Paper).order_by(Paper.id).limit(request.limit)).scalars().all()
+        # Papers that have no graph yet, not the first N by id. Taking the first N made the
+        # route a treadmill: once papers 1..N were extracted there was no way to reach N+1 and
+        # no way to resume a part-finished corpus. Now repeated calls make progress.
+        # ponytail: "no edges yet" also means a paper whose extraction yielded nothing gets
+        # retried on every call. That is the right default while extraction is still improving;
+        # add an attempted_at column when the retries cost more than the re-extractions gain.
+        papers = (
+            session.execute(
+                select(Paper)
+                .where(~exists().where(ConceptEdge.paper_id == Paper.id))
+                .order_by(Paper.id)
+                .limit(request.limit)
+            )
+            .scalars()
+            .all()
+        )
         try:
             return orchestrator.workers["graph"].run(session, papers)
         except MissingAPIKeyError as exc:
